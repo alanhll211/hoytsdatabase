@@ -12,7 +12,7 @@ import {
 import { db } from '../firebase'
 import { useFlash } from '../FlashContext'
 import DatePickInput from '../components/DatePickInput'
-import { parseAuDate, formatAuDate } from '../utils/date'
+import { parseAuDate, formatAuDate, formatAuDateTime } from '../utils/date'
 import { downloadCsv } from '../utils/csv'
 
 export default function Traceability() {
@@ -36,11 +36,15 @@ export default function Traceability() {
 
   async function runTraceability(recipe, productionDate) {
     const ingredientIds = recipe.ingredientIds || []
+    const ingredientNames = recipe.ingredientNames || []
     const cutoff = Timestamp.fromDate(productionDate)
 
-    const items = await Promise.all(
-      ingredientIds.map(async (ingredientId, idx) => {
-        const ingredientName = (recipe.ingredientNames || [])[idx] || ''
+    // Query each distinct ingredient only once, even if it appears more than
+    // once in the recipe, to avoid duplicate Firestore reads.
+    const uniqueIds = [...new Set(ingredientIds)]
+    const batchByIngredient = new Map()
+    await Promise.all(
+      uniqueIds.map(async (ingredientId) => {
         const snap = await getDocs(
           query(
             collection(db, 'batches'),
@@ -50,10 +54,18 @@ export default function Traceability() {
             limit(1)
           )
         )
-        const batch = snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data() }
-        return { ingredientId, ingredientName, batch }
+        batchByIngredient.set(
+          ingredientId,
+          snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data() }
+        )
       })
     )
+
+    const items = ingredientIds.map((ingredientId, idx) => ({
+      ingredientId,
+      ingredientName: ingredientNames[idx] || '',
+      batch: batchByIngredient.get(ingredientId) || null,
+    }))
     items.sort((a, b) => a.ingredientName.localeCompare(b.ingredientName))
     return items
   }
@@ -92,13 +104,20 @@ export default function Traceability() {
       ['Recipe', activeRecipe.name],
       ['Production Date', formatAuDate(activeProductionDate)],
       [],
-      ['Ingredient', 'Batch Number', 'Received Date'],
+      ['Ingredient', 'Supplier Name', 'Country', 'Batch Number', 'Received Date', 'Record Created Date'],
     ]
     for (const r of results) {
       if (r.batch) {
-        rows.push([r.ingredientName, r.batch.batchNumber, formatAuDate(r.batch.receivedDate)])
+        rows.push([
+          r.ingredientName,
+          r.batch.supplierName || '',
+          r.batch.country || '',
+          r.batch.batchNumber,
+          formatAuDate(r.batch.receivedDate),
+          r.batch.createdAt ? formatAuDateTime(r.batch.createdAt) : '',
+        ])
       } else {
-        rows.push([r.ingredientName, 'NO BATCH FOUND', ''])
+        rows.push([r.ingredientName, '', '', 'NO BATCH FOUND', '', ''])
       }
     }
     const safeName = activeRecipe.name.replace(/ /g, '_').replace(/\//g, '-')
@@ -182,14 +201,19 @@ export default function Traceability() {
                   <thead className="table-light">
                     <tr>
                       <th className="ps-4">Ingredient</th>
+                      <th>Supplier Name</th>
+                      <th>Country</th>
                       <th>Batch Number</th>
                       <th>Received Date</th>
+                      <th>Record Created Date</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {results.map((r) => (
-                      <tr key={r.ingredientId} className={!r.batch ? 'table-warning' : ''}>
+                    {results.map((r, idx) => (
+                      <tr key={`${r.ingredientId}-${idx}`} className={!r.batch ? 'table-warning' : ''}>
                         <td className="ps-4">{r.ingredientName}</td>
+                        <td>{r.batch?.supplierName || <span className="text-muted">—</span>}</td>
+                        <td>{r.batch?.country || <span className="text-muted">—</span>}</td>
                         <td>
                           {r.batch ? (
                             r.batch.batchNumber
@@ -200,6 +224,9 @@ export default function Traceability() {
                           )}
                         </td>
                         <td>{r.batch ? formatAuDate(r.batch.receivedDate) : <span className="text-muted">—</span>}</td>
+                        <td className="text-muted small">
+                          {r.batch?.createdAt ? formatAuDateTime(r.batch.createdAt) : <span className="text-muted">—</span>}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

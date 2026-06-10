@@ -4,13 +4,18 @@ import flatpickr from 'flatpickr'
 export default function DatePickInput({ value, onChange, placeholder, required, name }) {
   const inputRef = useRef(null)
   const fpRef = useRef(null)
+  const onChangeRef = useRef(onChange)
+
+  useEffect(() => {
+    onChangeRef.current = onChange
+  })
 
   useEffect(() => {
     fpRef.current = flatpickr(inputRef.current, {
       dateFormat: 'd/m/Y',
       allowInput: true,
       appendTo: document.body,
-      onChange: (_dates, dateStr) => onChange(dateStr),
+      onChange: (_dates, dateStr) => onChangeRef.current(dateStr),
     })
     return () => fpRef.current?.destroy()
   }, [])
