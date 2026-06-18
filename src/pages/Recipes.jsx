@@ -55,11 +55,13 @@ export default function Recipes() {
     )
   }
 
+  // Keep names parallel to `ids` (same order). Sorting here would misalign
+  // ingredientIds[i] from ingredientNames[i], which the Traceability page
+  // pairs positionally.
   function resolveIngredientNames(ids) {
     return ids
       .map((id) => ingredients.find((i) => i.id === id)?.name)
       .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b))
   }
 
   function resetAddForm() {
@@ -131,10 +133,11 @@ export default function Recipes() {
 
   return (
     <>
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h1 className="page-heading mb-0">
-          <i className="bi bi-book me-2 text-primary"></i>Recipes
-        </h1>
+      <div className="page-header">
+        <div>
+          <h1>Recipes</h1>
+          <p className="page-sub">Define each product as a list of its ingredients.</p>
+        </div>
         <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
           <i className="bi bi-plus-lg me-1"></i>Add Recipe
         </button>
@@ -173,7 +176,9 @@ export default function Recipes() {
                 </thead>
                 <tbody>
                   {filtered.map((recipe) => {
-                    const ings = recipe.ingredientNames || []
+                    const ings = [...(recipe.ingredientNames || [])].sort((a, b) =>
+                      a.localeCompare(b)
+                    )
                     return (
                       <tr key={recipe.id}>
                         <td className="ps-4 fw-medium">{recipe.name}</td>
@@ -181,7 +186,7 @@ export default function Recipes() {
                           {ings.length > 0 ? (
                             <>
                               {ings.slice(0, 4).map((name) => (
-                                <span key={name} className="badge bg-light text-dark border me-1">
+                                <span key={name} className="badge-soft me-1">
                                   {name}
                                 </span>
                               ))}
@@ -197,14 +202,14 @@ export default function Recipes() {
                         <td>
                           <div className="d-flex gap-1">
                             <button
-                              className="btn btn-sm btn-outline-secondary"
+                              className="btn btn-sm btn-outline-secondary btn-icon"
                               title="Edit"
                               onClick={() => openEdit(recipe)}
                             >
                               <i className="bi bi-pencil"></i>
                             </button>
                             <button
-                              className="btn btn-sm btn-outline-danger"
+                              className="btn btn-sm btn-outline-danger btn-icon"
                               title="Delete"
                               onClick={() => handleDelete(recipe)}
                             >
@@ -219,9 +224,12 @@ export default function Recipes() {
               </table>
             </div>
           ) : (
-            <div className="text-center py-5 text-muted">
-              <i className="bi bi-inbox display-4 d-block mb-2"></i>
-              {q ? `No recipes match "${q}".` : 'No recipes yet.'}
+            <div className="empty-state">
+              <span className="es-icon">
+                <i className="bi bi-journal-text"></i>
+              </span>
+              <div className="es-title">{q ? `No recipes match "${q}"` : 'No recipes yet'}</div>
+              <p>Create a recipe to start running traceability lookups.</p>
             </div>
           )}
         </div>

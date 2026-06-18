@@ -212,10 +212,11 @@ export default function Batches() {
 
   return (
     <>
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h1 className="page-heading mb-0">
-          <i className="bi bi-archive me-2 text-primary"></i>Batch Records
-        </h1>
+      <div className="page-header">
+        <div>
+          <h1>Batch Records</h1>
+          <p className="page-sub">Log every incoming ingredient delivery with its batch number.</p>
+        </div>
         <div className="d-flex gap-2">
           <button className="btn btn-outline-success" onClick={exportCsv}>
             <i className="bi bi-download me-1"></i>Export CSV
@@ -303,14 +304,14 @@ export default function Batches() {
                       <td>
                         <div className="d-flex gap-1">
                           <button
-                            className="btn btn-sm btn-outline-secondary"
+                            className="btn btn-sm btn-outline-secondary btn-icon"
                             title="Edit"
                             onClick={() => openEdit(b)}
                           >
                             <i className="bi bi-pencil"></i>
                           </button>
                           <button
-                            className="btn btn-sm btn-outline-danger"
+                            className="btn btn-sm btn-outline-danger btn-icon"
                             title="Delete"
                             onClick={() => handleDelete(b)}
                           >
@@ -324,9 +325,12 @@ export default function Batches() {
               </table>
             </div>
           ) : (
-            <div className="text-center py-5 text-muted">
-              <i className="bi bi-inbox display-4 d-block mb-2"></i>
-              No batch records found.
+            <div className="empty-state">
+              <span className="es-icon">
+                <i className="bi bi-inbox"></i>
+              </span>
+              <div className="es-title">No batch records found</div>
+              <p>Adjust the filters above, or add a new batch record.</p>
             </div>
           )}
         </div>

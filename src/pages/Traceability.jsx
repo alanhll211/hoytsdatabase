@@ -18,6 +18,7 @@ import { downloadCsv } from '../utils/csv'
 export default function Traceability() {
   const { flash } = useFlash()
   const [recipes, setRecipes] = useState([])
+  const [ingredients, setIngredients] = useState([])
 
   const [selectedRecipeId, setSelectedRecipeId] = useState('')
   const [productionDateStr, setProductionDateStr] = useState('')
@@ -28,14 +29,24 @@ export default function Traceability() {
   const [running, setRunning] = useState(false)
 
   useEffect(() => {
-    const unsub = onSnapshot(query(collection(db, 'recipes'), orderBy('name')), (snap) =>
+    const unsubRecipes = onSnapshot(query(collection(db, 'recipes'), orderBy('name')), (snap) =>
       setRecipes(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
     )
-    return unsub
+    const unsubIngredients = onSnapshot(collection(db, 'ingredients'), (snap) =>
+      setIngredients(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+    )
+    return () => {
+      unsubRecipes()
+      unsubIngredients()
+    }
   }, [])
 
   async function runTraceability(recipe, productionDate) {
     const ingredientIds = recipe.ingredientIds || []
+    // Resolve each name from its ingredient id rather than the recipe's
+    // parallel ingredientNames array, which can be stored out of order and
+    // would otherwise mismatch the supplier/country/batch columns.
+    const nameById = new Map(ingredients.map((i) => [i.id, i.name]))
     const ingredientNames = recipe.ingredientNames || []
     const cutoff = Timestamp.fromDate(productionDate)
 
@@ -63,7 +74,11 @@ export default function Traceability() {
 
     const items = ingredientIds.map((ingredientId, idx) => ({
       ingredientId,
-      ingredientName: ingredientNames[idx] || '',
+      ingredientName:
+        nameById.get(ingredientId) ||
+        batchByIngredient.get(ingredientId)?.ingredientName ||
+        ingredientNames[idx] ||
+        '',
       batch: batchByIngredient.get(ingredientId) || null,
     }))
     items.sort((a, b) => a.ingredientName.localeCompare(b.ingredientName))
@@ -132,10 +147,13 @@ export default function Traceability() {
 
   return (
     <>
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h1 className="page-heading mb-0">
-          <i className="bi bi-search me-2 text-primary"></i>Traceability Lookup
-        </h1>
+      <div className="page-header">
+        <div>
+          <h1>Traceability Lookup</h1>
+          <p className="page-sub">
+            Select a recipe and production date to see exactly which ingredient batches were used.
+          </p>
+        </div>
       </div>
 
       <div className="card mb-4">
@@ -237,9 +255,12 @@ export default function Traceability() {
               </div>
             </>
           ) : (
-            <div className="text-center py-5 text-muted">
-              <i className="bi bi-inbox display-4 d-block mb-2"></i>
-              This recipe has no ingredients assigned.
+            <div className="empty-state">
+              <span className="es-icon">
+                <i className="bi bi-inbox"></i>
+              </span>
+              <div className="es-title">No ingredients assigned</div>
+              <p>This recipe has no ingredients yet. Edit it on the Recipes page.</p>
             </div>
           )}
         </div>
