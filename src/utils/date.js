@@ -40,6 +40,16 @@ export function formatAuDateTime(date) {
   return `${formatAuDate(d)} ${hh}:${min}`
 }
 
+export function formatDdmmyy(date) {
+  if (!date) return ''
+  const d = date instanceof Date ? date : date.toDate ? date.toDate() : new Date(date)
+  if (isNaN(d)) return ''
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const yy = String(d.getFullYear() % 100).padStart(2, '0')
+  return `${dd}${mm}${yy}`
+}
+
 export function dateToISO(date) {
   if (!date) return ''
   const d = date instanceof Date ? date : new Date(date)

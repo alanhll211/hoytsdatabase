@@ -23,6 +23,7 @@ const emptyAddForm = {
   supplierName: '',
   country: '',
   batchNumber: '',
+  useCurrentDate: false,
   receivedDate: '',
 }
 
@@ -58,6 +59,13 @@ export default function Batches() {
     }
   }, [])
 
+  // Only offer filter options that can actually match a batch record, so
+  // ingredients whose batches were all deleted don't linger in the dropdown.
+  const filterIngredients = useMemo(() => {
+    const idsWithBatches = new Set(batches.map((b) => b.ingredientId))
+    return ingredients.filter((ing) => idsWithBatches.has(ing.id))
+  }, [ingredients, batches])
+
   const filtered = useMemo(() => {
     const qLower = q.trim().toLowerCase()
     const dFrom = parseAuDate(dateFrom)
@@ -67,7 +75,8 @@ export default function Batches() {
         if (qLower) {
           const matches =
             (b.ingredientName || '').toLowerCase().includes(qLower) ||
-            (b.batchNumber || '').toLowerCase().includes(qLower)
+            (b.batchNumber || '').toLowerCase().includes(qLower) ||
+            (b.useCurrentDate && 'current date'.includes(qLower))
           if (!matches) return false
         }
         if (ingredientId && b.ingredientId !== ingredientId) return false
@@ -118,7 +127,7 @@ export default function Batches() {
       flash('Please select an ingredient or enter a new one.', 'danger')
       return
     }
-    if (!form.batchNumber.trim()) {
+    if (!form.useCurrentDate && !form.batchNumber.trim()) {
       flash('Batch number is required.', 'danger')
       return
     }
@@ -133,11 +142,15 @@ export default function Batches() {
       ingredientName: ingredient.name,
       supplierName: form.supplierName.trim() || null,
       country: form.country.trim() || null,
-      batchNumber: form.batchNumber.trim(),
+      batchNumber: form.useCurrentDate ? null : form.batchNumber.trim(),
+      useCurrentDate: form.useCurrentDate,
       receivedDate: Timestamp.fromDate(receivedDate),
       createdAt: serverTimestamp(),
     })
-    flash(`Batch "${form.batchNumber.trim()}" added for ${ingredient.name}.`, 'success')
+    flash(
+      `Batch "${form.useCurrentDate ? 'Current Date' : form.batchNumber.trim()}" added for ${ingredient.name}.`,
+      'success'
+    )
     setShowAddModal(false)
     resetAddForm()
   }
@@ -145,21 +158,17 @@ export default function Batches() {
   function openEdit(batch) {
     setEditingBatch(batch)
     setEditForm({
-      ingredientId: batch.ingredientId,
       supplierName: batch.supplierName || '',
       country: batch.country || '',
-      batchNumber: batch.batchNumber,
+      batchNumber: batch.batchNumber || '',
+      useCurrentDate: !!batch.useCurrentDate,
       receivedDate: formatAuDate(batch.receivedDate),
     })
   }
 
   async function handleEditSubmit(e) {
     e.preventDefault()
-    if (!editForm.ingredientId) {
-      flash('Ingredient is required.', 'danger')
-      return
-    }
-    if (!editForm.batchNumber.trim()) {
+    if (!editForm.useCurrentDate && !editForm.batchNumber.trim()) {
       flash('Batch number is required.', 'danger')
       return
     }
@@ -169,24 +178,26 @@ export default function Batches() {
       return
     }
 
-    const ingredient = ingredients.find((i) => i.id === editForm.ingredientId)
     await updateDoc(doc(db, 'batches', editingBatch.id), {
-      ingredientId: editForm.ingredientId,
-      ingredientName: ingredient?.name || editingBatch.ingredientName,
       supplierName: editForm.supplierName.trim() || null,
       country: editForm.country.trim() || null,
-      batchNumber: editForm.batchNumber.trim(),
+      batchNumber: editForm.useCurrentDate ? null : editForm.batchNumber.trim(),
+      useCurrentDate: editForm.useCurrentDate,
       receivedDate: Timestamp.fromDate(receivedDate),
     })
-    flash(`Batch "${editForm.batchNumber.trim()}" updated.`, 'success')
+    flash(
+      `Batch "${editForm.useCurrentDate ? 'Current Date' : editForm.batchNumber.trim()}" updated.`,
+      'success'
+    )
     setEditingBatch(null)
     setEditForm(null)
   }
 
   async function handleDelete(batch) {
-    if (!confirm(`Delete batch '${batch.batchNumber}' for ${batch.ingredientName}?`)) return
+    const label = batch.useCurrentDate ? 'Current Date' : batch.batchNumber
+    if (!confirm(`Delete batch '${label}' for ${batch.ingredientName}?`)) return
     await deleteDoc(doc(db, 'batches', batch.id))
-    flash(`Batch "${batch.batchNumber}" deleted.`, 'success')
+    flash(`Batch "${label}" deleted.`, 'success')
   }
 
   function exportCsv() {
@@ -198,7 +209,7 @@ export default function Batches() {
         b.ingredientName,
         b.supplierName || '',
         b.country || '',
-        b.batchNumber,
+        b.useCurrentDate ? 'CURRENT DATE' : b.batchNumber,
         formatAuDate(b.receivedDate),
         b.createdAt ? formatAuDateTime(b.createdAt) : '',
       ])
@@ -249,7 +260,7 @@ export default function Batches() {
                 className="form-select form-select-sm"
               >
                 <option value="">All ingredients</option>
-                {ingredients.map((ing) => (
+                {filterIngredients.map((ing) => (
                   <option key={ing.id} value={ing.id}>
                     {ing.name}
                   </option>
@@ -296,7 +307,15 @@ export default function Batches() {
                       <td className="ps-4">{b.ingredientName}</td>
                       <td>{b.supplierName || '—'}</td>
                       <td>{b.country || '—'}</td>
-                      <td className="fw-medium">{b.batchNumber}</td>
+                      <td className="fw-medium">
+                        {b.useCurrentDate ? (
+                          <span className="badge-teal" title="Batch number follows the traceability production date (DDMMYY)">
+                            <i className="bi bi-calendar-event me-1"></i>Current Date
+                          </span>
+                        ) : (
+                          b.batchNumber
+                        )}
+                      </td>
                       <td>{formatAuDate(b.receivedDate)}</td>
                       <td className="text-muted small">
                         {b.createdAt ? formatAuDateTime(b.createdAt) : '—'}
@@ -428,12 +447,26 @@ export default function Batches() {
                     <input
                       type="text"
                       className="form-control"
-                      placeholder="e.g. LOT-20240115"
-                      required
+                      placeholder={form.useCurrentDate ? 'Production date (DDMMYY)' : 'e.g. LOT-20240115'}
+                      required={!form.useCurrentDate}
+                      disabled={form.useCurrentDate}
                       autoComplete="off"
-                      value={form.batchNumber}
+                      value={form.useCurrentDate ? '' : form.batchNumber}
                       onChange={(e) => setForm({ ...form, batchNumber: e.target.value })}
                     />
+                    <button
+                      type="button"
+                      className={`btn btn-sm mt-2 ${form.useCurrentDate ? 'btn-primary' : 'btn-outline-secondary'}`}
+                      onClick={() => setForm({ ...form, useCurrentDate: !form.useCurrentDate })}
+                    >
+                      <i className="bi bi-calendar-event me-1"></i>Use Current Date
+                    </button>
+                    {form.useCurrentDate && (
+                      <div className="form-text">
+                        No fixed batch number. Traceability will show the production date as DDMMYY
+                        (e.g. searching 10/07/2026 shows 100726).
+                      </div>
+                    )}
                   </div>
                   <div className="mb-1">
                     <label className="form-label fw-semibold">Received Date</label>
@@ -487,18 +520,10 @@ export default function Batches() {
                 <div className="modal-body">
                   <div className="mb-3">
                     <label className="form-label fw-semibold">Ingredient</label>
-                    <select
-                      className="form-select"
-                      value={editForm.ingredientId}
-                      onChange={(e) => setEditForm({ ...editForm, ingredientId: e.target.value })}
-                    >
-                      <option value="">— Select —</option>
-                      {ingredients.map((ing) => (
-                        <option key={ing.id} value={ing.id}>
-                          {ing.name}
-                        </option>
-                      ))}
-                    </select>
+                    <input type="text" className="form-control" value={editingBatch.ingredientName} disabled />
+                    <div className="form-text">
+                      The ingredient cannot be changed. Delete this record and add a new batch instead.
+                    </div>
                   </div>
                   <div className="mb-3">
                     <label className="form-label fw-semibold">Supplier Name</label>
@@ -525,11 +550,28 @@ export default function Batches() {
                     <input
                       type="text"
                       className="form-control"
-                      required
+                      placeholder={editForm.useCurrentDate ? 'Production date (DDMMYY)' : ''}
+                      required={!editForm.useCurrentDate}
+                      disabled={editForm.useCurrentDate}
                       autoComplete="off"
-                      value={editForm.batchNumber}
+                      value={editForm.useCurrentDate ? '' : editForm.batchNumber}
                       onChange={(e) => setEditForm({ ...editForm, batchNumber: e.target.value })}
                     />
+                    <button
+                      type="button"
+                      className={`btn btn-sm mt-2 ${editForm.useCurrentDate ? 'btn-primary' : 'btn-outline-secondary'}`}
+                      onClick={() =>
+                        setEditForm({ ...editForm, useCurrentDate: !editForm.useCurrentDate })
+                      }
+                    >
+                      <i className="bi bi-calendar-event me-1"></i>Use Current Date
+                    </button>
+                    {editForm.useCurrentDate && (
+                      <div className="form-text">
+                        No fixed batch number. Traceability will show the production date as DDMMYY
+                        (e.g. searching 10/07/2026 shows 100726).
+                      </div>
+                    )}
                   </div>
                   <div className="mb-1">
                     <label className="form-label fw-semibold">Received Date</label>

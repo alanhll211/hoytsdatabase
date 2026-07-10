@@ -12,7 +12,7 @@ import {
 import { db } from '../firebase'
 import { useFlash } from '../FlashContext'
 import DatePickInput from '../components/DatePickInput'
-import { parseAuDate, formatAuDate, formatAuDateTime } from '../utils/date'
+import { parseAuDate, formatAuDate, formatAuDateTime, formatDdmmyy } from '../utils/date'
 import { downloadCsv } from '../utils/csv'
 
 export default function Traceability() {
@@ -113,6 +113,12 @@ export default function Traceability() {
     }
   }
 
+  // "Current Date" batches have no fixed batch number — they resolve to the
+  // searched production date formatted as DDMMYY.
+  function displayBatchNumber(batch) {
+    return batch.useCurrentDate ? formatDdmmyy(activeProductionDate) : batch.batchNumber
+  }
+
   function exportCsv() {
     if (!results || !activeRecipe || !activeProductionDate) return
     const rows = [
@@ -127,7 +133,7 @@ export default function Traceability() {
           r.ingredientName,
           r.batch.supplierName || '',
           r.batch.country || '',
-          r.batch.batchNumber,
+          displayBatchNumber(r.batch),
           formatAuDate(r.batch.receivedDate),
           r.batch.createdAt ? formatAuDateTime(r.batch.createdAt) : '',
         ])
@@ -234,7 +240,7 @@ export default function Traceability() {
                         <td>{r.batch?.country || <span className="text-muted">—</span>}</td>
                         <td>
                           {r.batch ? (
-                            r.batch.batchNumber
+                            displayBatchNumber(r.batch)
                           ) : (
                             <span className="text-warning fw-semibold">
                               <i className="bi bi-exclamation-triangle me-1"></i>No batch found
