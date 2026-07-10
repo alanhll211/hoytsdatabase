@@ -158,6 +158,7 @@ export default function Batches() {
   function openEdit(batch) {
     setEditingBatch(batch)
     setEditForm({
+      ingredientId: batch.ingredientId,
       supplierName: batch.supplierName || '',
       country: batch.country || '',
       batchNumber: batch.batchNumber || '',
@@ -168,6 +169,10 @@ export default function Batches() {
 
   async function handleEditSubmit(e) {
     e.preventDefault()
+    if (!editForm.ingredientId) {
+      flash('Ingredient is required.', 'danger')
+      return
+    }
     if (!editForm.useCurrentDate && !editForm.batchNumber.trim()) {
       flash('Batch number is required.', 'danger')
       return
@@ -178,7 +183,10 @@ export default function Batches() {
       return
     }
 
+    const ingredient = ingredients.find((i) => i.id === editForm.ingredientId)
     await updateDoc(doc(db, 'batches', editingBatch.id), {
+      ingredientId: editForm.ingredientId,
+      ingredientName: ingredient?.name || editingBatch.ingredientName,
       supplierName: editForm.supplierName.trim() || null,
       country: editForm.country.trim() || null,
       batchNumber: editForm.useCurrentDate ? null : editForm.batchNumber.trim(),
@@ -520,10 +528,18 @@ export default function Batches() {
                 <div className="modal-body">
                   <div className="mb-3">
                     <label className="form-label fw-semibold">Ingredient</label>
-                    <input type="text" className="form-control" value={editingBatch.ingredientName} disabled />
-                    <div className="form-text">
-                      The ingredient cannot be changed. Delete this record and add a new batch instead.
-                    </div>
+                    <select
+                      className="form-select"
+                      value={editForm.ingredientId}
+                      onChange={(e) => setEditForm({ ...editForm, ingredientId: e.target.value })}
+                    >
+                      <option value="">— Select —</option>
+                      {ingredients.map((ing) => (
+                        <option key={ing.id} value={ing.id}>
+                          {ing.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div className="mb-3">
                     <label className="form-label fw-semibold">Supplier Name</label>
