@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "npm run build && wrangler dev",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "npm run build && wrangler deploy",
+    "deploy:firebase": "npm run build && npx -y firebase-tools@latest deploy --only hosting"
   },
   "dependencies": {
     "bootstrap": "^5.3.8",
