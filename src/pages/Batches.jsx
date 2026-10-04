@@ -16,6 +16,7 @@ import { useFlash } from '../FlashContext'
 import DatePickInput from '../components/DatePickInput'
 import { parseAuDate, formatAuDate, formatAuDateTime } from '../utils/date'
 import { downloadCsv } from '../utils/csv'
+import { withTextPrefix } from '../utils/batch'
 
 const emptyAddForm = {
   ingredientId: '',
@@ -40,6 +41,7 @@ export default function Batches() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [ingMode, setIngMode] = useState('select')
   const [form, setForm] = useState(emptyAddForm)
+  const [saving, setSaving] = useState(false)
 
   const [editingBatch, setEditingBatch] = useState(null)
   const [editForm, setEditForm] = useState(null)
@@ -120,10 +122,40 @@ export default function Batches() {
     setIngMode('select')
   }
 
+  function openAdd() {
+    // Received Date always defaults to today, never to a previous record's date.
+    setForm({ ...emptyAddForm, receivedDate: formatAuDate(new Date()) })
+    setIngMode('select')
+    setShowAddModal(true)
+  }
+
+  // Pre-fill supplier, country and batch number from the most recently created
+  // batch record for the chosen ingredient — all still editable.
+  function handleSelectExisting(id) {
+    if (!id) {
+      setForm((f) => ({ ...f, ingredientId: '' }))
+      return
+    }
+    const last = batches
+      .filter((b) => b.ingredientId === id)
+      .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0))[0]
+    setForm((f) => ({
+      ...f,
+      ingredientId: id,
+      supplierName: last?.supplierName || '',
+      country: last?.country || '',
+      batchNumber: last?.batchNumber || '',
+      useCurrentDate: !!last?.useCurrentDate,
+    }))
+  }
+
   async function handleAddSubmit(e) {
     e.preventDefault()
-    const ingredient = await resolveIngredient()
-    if (!ingredient) {
+    if (saving) return
+    // "Save & Add Another" keeps the dialog open with a fresh form.
+    const addAnother = e.nativeEvent?.submitter?.value === 'another'
+
+    if (ingMode === 'new' ? !form.newIngredientName.trim() : !form.ingredientId) {
       flash('Please select an ingredient or enter a new one.', 'danger')
       return
     }
@@ -137,22 +169,37 @@ export default function Batches() {
       return
     }
 
-    await addDoc(collection(db, 'batches'), {
-      ingredientId: ingredient.id,
-      ingredientName: ingredient.name,
-      supplierName: form.supplierName.trim() || null,
-      country: form.country.trim() || null,
-      batchNumber: form.useCurrentDate ? null : form.batchNumber.trim(),
-      useCurrentDate: form.useCurrentDate,
-      receivedDate: Timestamp.fromDate(receivedDate),
-      createdAt: serverTimestamp(),
-    })
-    flash(
-      `Batch "${form.useCurrentDate ? 'Current Date' : form.batchNumber.trim()}" added for ${ingredient.name}.`,
-      'success'
-    )
-    setShowAddModal(false)
-    resetAddForm()
+    setSaving(true)
+    try {
+      const ingredient = await resolveIngredient()
+      if (!ingredient) {
+        flash('Please select an ingredient or enter a new one.', 'danger')
+        return
+      }
+      const batchNumber = form.useCurrentDate ? null : withTextPrefix(form.batchNumber)
+      await addDoc(collection(db, 'batches'), {
+        ingredientId: ingredient.id,
+        ingredientName: ingredient.name,
+        supplierName: form.supplierName.trim() || null,
+        country: form.country.trim() || null,
+        batchNumber,
+        useCurrentDate: form.useCurrentDate,
+        receivedDate: Timestamp.fromDate(receivedDate),
+        createdAt: serverTimestamp(),
+      })
+      flash(`Batch ${batchNumber ?? 'Current Date'} added for ${ingredient.name}.`, 'success')
+      if (addAnother) {
+        openAdd()
+      } else {
+        setShowAddModal(false)
+        resetAddForm()
+      }
+    } catch (err) {
+      console.error(err)
+      flash('Could not save the batch. Please try again.', 'danger')
+    } finally {
+      setSaving(false)
+    }
   }
 
   function openEdit(batch) {
@@ -183,29 +230,36 @@ export default function Batches() {
       return
     }
 
+    if (saving) return
     const ingredient = ingredients.find((i) => i.id === editForm.ingredientId)
-    await updateDoc(doc(db, 'batches', editingBatch.id), {
-      ingredientId: editForm.ingredientId,
-      ingredientName: ingredient?.name || editingBatch.ingredientName,
-      supplierName: editForm.supplierName.trim() || null,
-      country: editForm.country.trim() || null,
-      batchNumber: editForm.useCurrentDate ? null : editForm.batchNumber.trim(),
-      useCurrentDate: editForm.useCurrentDate,
-      receivedDate: Timestamp.fromDate(receivedDate),
-    })
-    flash(
-      `Batch "${editForm.useCurrentDate ? 'Current Date' : editForm.batchNumber.trim()}" updated.`,
-      'success'
-    )
-    setEditingBatch(null)
-    setEditForm(null)
+    const batchNumber = editForm.useCurrentDate ? null : withTextPrefix(editForm.batchNumber)
+    setSaving(true)
+    try {
+      await updateDoc(doc(db, 'batches', editingBatch.id), {
+        ingredientId: editForm.ingredientId,
+        ingredientName: ingredient?.name || editingBatch.ingredientName,
+        supplierName: editForm.supplierName.trim() || null,
+        country: editForm.country.trim() || null,
+        batchNumber,
+        useCurrentDate: editForm.useCurrentDate,
+        receivedDate: Timestamp.fromDate(receivedDate),
+      })
+      flash(`Batch ${batchNumber ?? 'Current Date'} updated.`, 'success')
+      setEditingBatch(null)
+      setEditForm(null)
+    } catch (err) {
+      console.error(err)
+      flash('Could not save changes. Please try again.', 'danger')
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function handleDelete(batch) {
     const label = batch.useCurrentDate ? 'Current Date' : batch.batchNumber
     if (!confirm(`Delete batch '${label}' for ${batch.ingredientName}?`)) return
     await deleteDoc(doc(db, 'batches', batch.id))
-    flash(`Batch "${label}" deleted.`, 'success')
+    flash(`Batch ${label} deleted.`, 'success')
   }
 
   function exportCsv() {
@@ -217,7 +271,7 @@ export default function Batches() {
         b.ingredientName,
         b.supplierName || '',
         b.country || '',
-        b.useCurrentDate ? 'CURRENT DATE' : b.batchNumber,
+        b.useCurrentDate ? 'CURRENT DATE' : withTextPrefix(b.batchNumber),
         formatAuDate(b.receivedDate),
         b.createdAt ? formatAuDateTime(b.createdAt) : '',
       ])
@@ -240,7 +294,7 @@ export default function Batches() {
           <button className="btn btn-outline-success" onClick={exportCsv}>
             <i className="bi bi-download me-1"></i>Export CSV
           </button>
-          <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
+          <button className="btn btn-primary" onClick={openAdd}>
             <i className="bi bi-plus-lg me-1"></i>Add Batch
           </button>
         </div>
@@ -251,21 +305,21 @@ export default function Batches() {
         <div className="card-body py-3">
           <div className="row g-2 align-items-end">
             <div className="col-md-3">
-              <label className="form-label form-label-sm fw-semibold mb-1">Search</label>
+              <label className="form-label">Search</label>
               <input
                 type="text"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                className="form-control form-control-sm"
+                className="form-control"
                 placeholder="Ingredient or batch number"
               />
             </div>
             <div className="col-md-3">
-              <label className="form-label form-label-sm fw-semibold mb-1">Ingredient</label>
+              <label className="form-label">Ingredient</label>
               <select
                 value={ingredientId}
                 onChange={(e) => setIngredientId(e.target.value)}
-                className="form-select form-select-sm"
+                className="form-select"
               >
                 <option value="">All ingredients</option>
                 {filterIngredients.map((ing) => (
@@ -276,15 +330,15 @@ export default function Batches() {
               </select>
             </div>
             <div className="col-md-2">
-              <label className="form-label form-label-sm fw-semibold mb-1">Received from</label>
+              <label className="form-label">Received from</label>
               <DatePickInput value={dateFrom} onChange={setDateFrom} />
             </div>
             <div className="col-md-2">
-              <label className="form-label form-label-sm fw-semibold mb-1">Received to</label>
+              <label className="form-label">Received to</label>
               <DatePickInput value={dateTo} onChange={setDateTo} />
             </div>
             <div className="col-md-2 d-flex gap-2">
-              <button className="btn btn-sm btn-outline-secondary flex-fill" onClick={clearFilters}>
+              <button className="btn btn-outline-secondary flex-fill" onClick={clearFilters}>
                 Clear
               </button>
             </div>
@@ -321,7 +375,7 @@ export default function Batches() {
                             <i className="bi bi-calendar-event me-1"></i>Current Date
                           </span>
                         ) : (
-                          b.batchNumber
+                          withTextPrefix(b.batchNumber)
                         )}
                       </td>
                       <td>{formatAuDate(b.receivedDate)}</td>
@@ -388,27 +442,31 @@ export default function Batches() {
                 <div className="modal-body">
                   <div className="mb-3">
                     <label className="form-label fw-semibold">Ingredient</label>
-                    <div className="d-flex gap-2 mb-2">
+                    <div className="segmented mb-2" role="tablist">
                       <button
                         type="button"
-                        className={`btn btn-sm ${ingMode === 'select' ? 'btn-primary' : 'btn-outline-secondary'}`}
+                        role="tab"
+                        aria-selected={ingMode === 'select'}
+                        className={ingMode === 'select' ? 'active' : ''}
                         onClick={() => setIngMode('select')}
                       >
                         Select existing
                       </button>
                       <button
                         type="button"
-                        className={`btn btn-sm ${ingMode === 'new' ? 'btn-primary' : 'btn-outline-secondary'}`}
+                        role="tab"
+                        aria-selected={ingMode === 'new'}
+                        className={ingMode === 'new' ? 'active' : ''}
                         onClick={() => setIngMode('new')}
                       >
-                        + Create new
+                        Create new
                       </button>
                     </div>
                     {ingMode === 'select' ? (
                       <select
                         className="form-select"
                         value={form.ingredientId}
-                        onChange={(e) => setForm({ ...form, ingredientId: e.target.value })}
+                        onChange={(e) => handleSelectExisting(e.target.value)}
                       >
                         <option value="">— Select —</option>
                         {ingredients.map((ing) => (
@@ -464,11 +522,17 @@ export default function Batches() {
                     />
                     <button
                       type="button"
-                      className={`btn btn-sm mt-2 ${form.useCurrentDate ? 'btn-primary' : 'btn-outline-secondary'}`}
+                      className={`chip-toggle mt-2 ${form.useCurrentDate ? 'on' : ''}`}
+                      aria-pressed={form.useCurrentDate}
                       onClick={() => setForm({ ...form, useCurrentDate: !form.useCurrentDate })}
                     >
-                      <i className="bi bi-calendar-event me-1"></i>Use Current Date
+                      <i className="bi bi-calendar-event"></i>Use Current Date
                     </button>
+                    {!form.useCurrentDate && (
+                      <div className="form-text">
+                        Saved with a leading apostrophe (e.g. &apos;312216) so Excel keeps it as text.
+                      </div>
+                    )}
                     {form.useCurrentDate && (
                       <div className="form-text">
                         No fixed batch number. Traceability will show the production date as DDMMYY
@@ -497,8 +561,17 @@ export default function Batches() {
                   >
                     Cancel
                   </button>
-                  <button type="submit" className="btn btn-primary">
-                    Add Batch
+                  <button
+                    type="submit"
+                    value="another"
+                    className="btn btn-outline-primary"
+                    disabled={saving}
+                    title="Save this batch and start a new one"
+                  >
+                    Save &amp; Add Another
+                  </button>
+                  <button type="submit" value="close" className="btn btn-primary" disabled={saving}>
+                    {saving ? 'Saving…' : 'Add Batch'}
                   </button>
                 </div>
               </form>
@@ -575,12 +648,13 @@ export default function Batches() {
                     />
                     <button
                       type="button"
-                      className={`btn btn-sm mt-2 ${editForm.useCurrentDate ? 'btn-primary' : 'btn-outline-secondary'}`}
+                      className={`chip-toggle mt-2 ${editForm.useCurrentDate ? 'on' : ''}`}
+                      aria-pressed={editForm.useCurrentDate}
                       onClick={() =>
                         setEditForm({ ...editForm, useCurrentDate: !editForm.useCurrentDate })
                       }
                     >
-                      <i className="bi bi-calendar-event me-1"></i>Use Current Date
+                      <i className="bi bi-calendar-event"></i>Use Current Date
                     </button>
                     {editForm.useCurrentDate && (
                       <div className="form-text">
@@ -609,8 +683,8 @@ export default function Batches() {
                   >
                     Cancel
                   </button>
-                  <button type="submit" className="btn btn-primary">
-                    Save Changes
+                  <button type="submit" className="btn btn-primary" disabled={saving}>
+                    {saving ? 'Saving…' : 'Save Changes'}
                   </button>
                 </div>
               </form>

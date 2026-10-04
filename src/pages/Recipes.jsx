@@ -19,6 +19,7 @@ export default function Recipes() {
   const [recipes, setRecipes] = useState([])
   const [ingredients, setIngredients] = useState([])
   const [q, setQ] = useState('')
+  const [expandedIds, setExpandedIds] = useState(() => new Set())
 
   const [showAddModal, setShowAddModal] = useState(false)
   const [addName, setAddName] = useState('')
@@ -62,6 +63,18 @@ export default function Recipes() {
     return ids
       .map((id) => ingredients.find((i) => i.id === id)?.name)
       .filter(Boolean)
+  }
+
+  function toggleExpanded(id) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
   }
 
   function resetAddForm() {
@@ -179,19 +192,31 @@ export default function Recipes() {
                     const ings = [...(recipe.ingredientNames || [])].sort((a, b) =>
                       a.localeCompare(b)
                     )
+                    const expanded = expandedIds.has(recipe.id)
                     return (
                       <tr key={recipe.id}>
                         <td className="ps-4 fw-medium">{recipe.name}</td>
                         <td>
                           {ings.length > 0 ? (
                             <>
-                              {ings.slice(0, 4).map((name) => (
-                                <span key={name} className="badge-soft me-1">
-                                  {name}
-                                </span>
-                              ))}
-                              {ings.length > 4 && (
-                                <span className="text-muted small">+{ings.length - 4} more</span>
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-link p-0 text-decoration-none"
+                                aria-expanded={expanded}
+                                title={expanded ? 'Collapse ingredients' : 'Show all ingredients'}
+                                onClick={() => toggleExpanded(recipe.id)}
+                              >
+                                {ings.length} Ingredient{ings.length !== 1 ? 's' : ''}
+                                <i className={`bi ms-1 bi-chevron-${expanded ? 'up' : 'down'}`}></i>
+                              </button>
+                              {expanded && (
+                                <div className="mt-2">
+                                  {ings.map((name) => (
+                                    <span key={name} className="badge-soft me-1 mb-1 d-inline-block">
+                                      {name}
+                                    </span>
+                                  ))}
+                                </div>
                               )}
                             </>
                           ) : (

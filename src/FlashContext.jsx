@@ -12,7 +12,7 @@ export function FlashProvider({ children }) {
     setMessages((prev) => [...prev, { id, text, category }])
     setTimeout(() => {
       setMessages((prev) => prev.filter((m) => m.id !== id))
-    }, 6000)
+    }, 4000)
   }, [])
 
   const dismiss = useCallback((id) => {

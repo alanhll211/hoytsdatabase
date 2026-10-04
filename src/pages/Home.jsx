@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { collection, onSnapshot } from 'firebase/firestore'
 import { db } from '../firebase'
 import { formatAuDate } from '../utils/date'
+import { withTextPrefix } from '../utils/batch'
 
 export default function Home() {
   const [ingredients, setIngredients] = useState([])
@@ -117,6 +118,7 @@ export default function Home() {
             </span>
             <div className="ac-title">Add a batch record</div>
             <p className="ac-desc">Log a new ingredient delivery with its supplier and batch number.</p>
+            <span className="ac-more">Add batch ›</span>
           </Link>
         </div>
         <div className="col-md-4">
@@ -126,6 +128,7 @@ export default function Home() {
             </span>
             <div className="ac-title">Manage recipes</div>
             <p className="ac-desc">Define which ingredients make up each of your products.</p>
+            <span className="ac-more">Open recipes ›</span>
           </Link>
         </div>
         <div className="col-md-4">
@@ -135,6 +138,7 @@ export default function Home() {
             </span>
             <div className="ac-title">Trace a production run</div>
             <p className="ac-desc">Find which batch of every ingredient went into a given date's production.</p>
+            <span className="ac-more">Start tracing ›</span>
           </Link>
         </div>
       </div>
@@ -164,7 +168,7 @@ export default function Home() {
                     <tr key={b.id}>
                       <td className="ps-4 fw-medium">{b.ingredientName}</td>
                       <td>{b.supplierName || <span className="text-muted">—</span>}</td>
-                      <td>{b.batchNumber}</td>
+                      <td>{b.useCurrentDate ? 'Current Date' : withTextPrefix(b.batchNumber)}</td>
                       <td className="text-muted">{formatAuDate(b.receivedDate)}</td>
                     </tr>
                   ))}

@@ -14,6 +14,8 @@ import { useFlash } from '../FlashContext'
 import DatePickInput from '../components/DatePickInput'
 import { parseAuDate, formatAuDate, formatAuDateTime, formatDdmmyy } from '../utils/date'
 import { downloadCsv } from '../utils/csv'
+import { withTextPrefix } from '../utils/batch'
+import { copyText } from '../utils/clipboard'
 
 export default function Traceability() {
   const { flash } = useFlash()
@@ -27,6 +29,7 @@ export default function Traceability() {
   const [activeRecipe, setActiveRecipe] = useState(null)
   const [activeProductionDate, setActiveProductionDate] = useState(null)
   const [running, setRunning] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     const unsubRecipes = onSnapshot(query(collection(db, 'recipes'), orderBy('name')), (snap) =>
@@ -108,15 +111,43 @@ export default function Traceability() {
       setResults(items)
       setActiveRecipe(recipe)
       setActiveProductionDate(productionDate)
+      setCopied(false)
     } finally {
       setRunning(false)
     }
   }
 
   // "Current Date" batches have no fixed batch number — they resolve to the
-  // searched production date formatted as DDMMYY.
+  // searched production date formatted as DDMMYY. All batch numbers carry a
+  // leading apostrophe so Excel keeps them as text.
   function displayBatchNumber(batch) {
-    return batch.useCurrentDate ? formatDdmmyy(activeProductionDate) : batch.batchNumber
+    return withTextPrefix(
+      batch.useCurrentDate ? formatDdmmyy(activeProductionDate) : batch.batchNumber
+    )
+  }
+
+  // Copy Ingredient / Supplier / Country / Batch Number as tab-separated rows,
+  // ready to paste straight into Excel (no header row, no date columns).
+  async function copyForExcel() {
+    if (!results) return
+    const lines = results.map((r) =>
+      [
+        r.ingredientName,
+        r.batch?.supplierName || '',
+        r.batch?.country || '',
+        r.batch ? displayBatchNumber(r.batch) : 'NO BATCH FOUND',
+      ]
+        .map((v) => String(v).replace(/[\t\r\n]+/g, ' '))
+        .join('\t')
+    )
+    const ok = await copyText(lines.join('\r\n'))
+    if (ok) {
+      setCopied(true)
+      flash(`Copied ${lines.length} row${lines.length !== 1 ? 's' : ''}. Paste into Excel.`, 'success')
+      setTimeout(() => setCopied(false), 2000)
+    } else {
+      flash('Copy failed. Your browser blocked clipboard access.', 'danger')
+    }
   }
 
   function exportCsv() {
@@ -199,16 +230,27 @@ export default function Traceability() {
 
       {results !== null && activeRecipe && activeProductionDate && (
         <div className="card">
-          <div className="card-header bg-white d-flex justify-content-between align-items-center py-3">
+          <div className="card-header d-flex flex-wrap gap-2 justify-content-between align-items-center py-3">
             <div>
-              <span className="fw-semibold fs-6">{activeRecipe.name}</span>
-              <span className="text-muted ms-2">
-                Production date: {formatAuDate(activeProductionDate)}
-              </span>
+              <div className="fw-semibold">{activeRecipe.name}</div>
+              <div className="text-muted small">
+                Production date {formatAuDate(activeProductionDate)}
+              </div>
             </div>
-            <button className="btn btn-sm btn-outline-success" onClick={exportCsv}>
-              <i className="bi bi-download me-1"></i>Export CSV
-            </button>
+            <div className="d-flex gap-2">
+              <button
+                className="btn btn-sm btn-primary"
+                onClick={copyForExcel}
+                disabled={results.length === 0}
+                title="Copy Ingredient, Supplier Name, Country and Batch Number for Excel"
+              >
+                <i className={`bi ${copied ? 'bi-check-lg' : 'bi-clipboard'} me-1`}></i>
+                {copied ? 'Copied' : 'Copy'}
+              </button>
+              <button className="btn btn-sm btn-outline-success" onClick={exportCsv}>
+                <i className="bi bi-download me-1"></i>Export CSV
+              </button>
+            </div>
           </div>
 
           {results.length > 0 ? (
@@ -238,7 +280,7 @@ export default function Traceability() {
                         <td className="ps-4">{r.ingredientName}</td>
                         <td>{r.batch?.supplierName || <span className="text-muted">—</span>}</td>
                         <td>{r.batch?.country || <span className="text-muted">—</span>}</td>
-                        <td>
+                        <td className="fw-medium">
                           {r.batch ? (
                             displayBatchNumber(r.batch)
                           ) : (
