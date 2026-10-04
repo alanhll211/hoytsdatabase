@@ -31,3 +31,6 @@ dist-ssr
 .env*
 !.env.example
 !.env.production
+
+# firebase cache
+.firebase
