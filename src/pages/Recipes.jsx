@@ -13,6 +13,95 @@ import {
 import { db } from '../firebase'
 import { useFlash } from '../FlashContext'
 import { formatAuDate } from '../utils/date'
+import { PH_NOT_TESTED, normalizeBarcode } from '../utils/excelRow'
+
+const emptyProduct = () => ({
+  packs: [{ size: '', barcode: '' }],
+  phStart: PH_NOT_TESTED,
+  phEnd: PH_NOT_TESTED,
+})
+
+// Fields saved on the recipe. Rows with neither size nor barcode are dropped.
+function productFieldsToSave(product) {
+  return {
+    packs: product.packs
+      .map((p) => ({ size: p.size.trim(), barcode: normalizeBarcode(p.barcode) }))
+      .filter((p) => p.size || p.barcode),
+    phStart: product.phStart.trim(),
+    phEnd: product.phEnd.trim(),
+  }
+}
+
+// Size / barcode / pH defaults that fill the grey row of the Excel copy.
+function ProductFields({ idPrefix, value, onChange }) {
+  function setPack(index, key, v) {
+    onChange({ ...value, packs: value.packs.map((p, i) => (i === index ? { ...p, [key]: v } : p)) })
+  }
+  return (
+    <div className="mb-3">
+      <label className="form-label fw-semibold">Packs (Excel Size and Label Barcode)</label>
+      {value.packs.map((pack, i) => (
+        <div className="d-flex gap-2 mb-2" key={i}>
+          <input
+            className="form-control"
+            placeholder="Size, e.g. 750g"
+            aria-label="Size"
+            autoComplete="off"
+            value={pack.size}
+            onChange={(e) => setPack(i, 'size', e.target.value)}
+          />
+          <input
+            className="form-control"
+            placeholder="Barcode, last 6 digits"
+            aria-label="Label barcode"
+            autoComplete="off"
+            value={pack.barcode}
+            onChange={(e) => setPack(i, 'barcode', e.target.value)}
+          />
+          {value.packs.length > 1 && (
+            <button
+              type="button"
+              className="btn btn-outline-danger btn-icon"
+              title="Remove pack"
+              onClick={() => onChange({ ...value, packs: value.packs.filter((_, x) => x !== i) })}
+            >
+              <i className="bi bi-trash"></i>
+            </button>
+          )}
+        </div>
+      ))}
+      <button
+        type="button"
+        className="btn btn-sm btn-outline-secondary mb-3"
+        onClick={() => onChange({ ...value, packs: [...value.packs, { size: '', barcode: '' }] })}
+      >
+        <i className="bi bi-plus-lg me-1"></i>Add Pack
+      </button>
+      <div className="row g-2">
+        <div className="col-6">
+          <label className="form-label fw-semibold" htmlFor={`${idPrefix}_ph_start`}>pH Start</label>
+          <input
+            id={`${idPrefix}_ph_start`}
+            className="form-control"
+            autoComplete="off"
+            value={value.phStart}
+            onChange={(e) => onChange({ ...value, phStart: e.target.value })}
+          />
+        </div>
+        <div className="col-6">
+          <label className="form-label fw-semibold" htmlFor={`${idPrefix}_ph_end`}>pH End</label>
+          <input
+            id={`${idPrefix}_ph_end`}
+            className="form-control"
+            autoComplete="off"
+            value={value.phEnd}
+            onChange={(e) => onChange({ ...value, phEnd: e.target.value })}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function Recipes() {
   const { flash } = useFlash()
@@ -24,10 +113,12 @@ export default function Recipes() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [addName, setAddName] = useState('')
   const [addIngredientIds, setAddIngredientIds] = useState([])
+  const [addProduct, setAddProduct] = useState(emptyProduct)
 
   const [editingRecipe, setEditingRecipe] = useState(null)
   const [editName, setEditName] = useState('')
   const [editIngredientIds, setEditIngredientIds] = useState([])
+  const [editProduct, setEditProduct] = useState(emptyProduct)
 
   useEffect(() => {
     const unsubRecipes = onSnapshot(
@@ -80,6 +171,7 @@ export default function Recipes() {
   function resetAddForm() {
     setAddName('')
     setAddIngredientIds([])
+    setAddProduct(emptyProduct())
   }
 
   function toggleAddIngredient(id) {
@@ -105,6 +197,7 @@ export default function Recipes() {
       name,
       ingredientIds: addIngredientIds,
       ingredientNames: resolveIngredientNames(addIngredientIds),
+      ...productFieldsToSave(addProduct),
       createdAt: serverTimestamp(),
     })
     flash(`Recipe "${name}" created.`, 'success')
@@ -116,6 +209,11 @@ export default function Recipes() {
     setEditingRecipe(recipe)
     setEditName(recipe.name)
     setEditIngredientIds(recipe.ingredientIds || [])
+    setEditProduct({
+      packs: recipe.packs?.length ? recipe.packs : emptyProduct().packs,
+      phStart: recipe.phStart ?? PH_NOT_TESTED,
+      phEnd: recipe.phEnd ?? PH_NOT_TESTED,
+    })
   }
 
   async function handleEditSubmit(e) {
@@ -133,6 +231,7 @@ export default function Recipes() {
       name,
       ingredientIds: editIngredientIds,
       ingredientNames: resolveIngredientNames(editIngredientIds),
+      ...productFieldsToSave(editProduct),
     })
     flash(`Recipe "${name}" updated.`, 'success')
     setEditingRecipe(null)
@@ -183,6 +282,7 @@ export default function Recipes() {
                   <tr>
                     <th className="ps-4">Recipe Name</th>
                     <th>Ingredients</th>
+                    <th>Packs</th>
                     <th>Created</th>
                     <th style={{ width: 110 }}></th>
                   </tr>
@@ -221,6 +321,17 @@ export default function Recipes() {
                             </>
                           ) : (
                             <span className="text-muted small">No ingredients</span>
+                          )}
+                        </td>
+                        <td className="small">
+                          {recipe.packs?.length ? (
+                            recipe.packs.map((p, i) => (
+                              <div key={i} className="text-nowrap">
+                                {p.size || '—'} · {p.barcode || '—'}
+                              </div>
+                            ))
+                          ) : (
+                            <span className="text-muted">Not set</span>
                           )}
                         </td>
                         <td className="text-muted">{formatAuDate(recipe.createdAt)}</td>
@@ -296,6 +407,7 @@ export default function Recipes() {
                       onChange={(e) => setAddName(e.target.value)}
                     />
                   </div>
+                  <ProductFields idPrefix="add" value={addProduct} onChange={setAddProduct} />
                   <div>
                     <label className="form-label fw-semibold">Ingredients</label>
                     {ingredients.length > 0 ? (
@@ -370,6 +482,7 @@ export default function Recipes() {
                       onChange={(e) => setEditName(e.target.value)}
                     />
                   </div>
+                  <ProductFields idPrefix="edit" value={editProduct} onChange={setEditProduct} />
                   <div>
                     <label className="form-label fw-semibold">Ingredients</label>
                     {ingredients.length > 0 ? (

@@ -15,7 +15,28 @@ import DatePickInput from '../components/DatePickInput'
 import { parseAuDate, formatAuDate, formatAuDateTime, formatDdmmyy } from '../utils/date'
 import { downloadCsv } from '../utils/csv'
 import { withTextPrefix } from '../utils/batch'
-import { copyText } from '../utils/clipboard'
+import { copyHtmlTable, copyText } from '../utils/clipboard'
+import {
+  PH_NOT_TESTED,
+  buildExcelRows,
+  hoytsBatchNumber,
+  normalizeBarcode,
+  parseRecipeName,
+  rowsToHtml,
+  rowsToTsv,
+} from '../utils/excelRow'
+
+function initialHeader(recipe) {
+  const pack = recipe.packs?.[0]
+  return {
+    packIndex: 0,
+    size: pack?.size || '',
+    barcode: pack?.barcode || '',
+    phStart: recipe.phStart ?? PH_NOT_TESTED,
+    phEnd: recipe.phEnd ?? PH_NOT_TESTED,
+    document: parseRecipeName(recipe.name).document,
+  }
+}
 
 export default function Traceability() {
   const { flash } = useFlash()
@@ -29,7 +50,10 @@ export default function Traceability() {
   const [activeRecipe, setActiveRecipe] = useState(null)
   const [activeProductionDate, setActiveProductionDate] = useState(null)
   const [running, setRunning] = useState(false)
-  const [copied, setCopied] = useState(false)
+  // Which copy button just succeeded: 'all', 'materials' or null.
+  const [copied, setCopied] = useState(null)
+  // Grey-row values for this lookup only; recipe defaults are edited on Recipes.
+  const [header, setHeader] = useState(null)
 
   useEffect(() => {
     const unsubRecipes = onSnapshot(query(collection(db, 'recipes'), orderBy('name')), (snap) =>
@@ -111,7 +135,8 @@ export default function Traceability() {
       setResults(items)
       setActiveRecipe(recipe)
       setActiveProductionDate(productionDate)
-      setCopied(false)
+      setHeader(initialHeader(recipe))
+      setCopied(null)
     } finally {
       setRunning(false)
     }
@@ -126,28 +151,60 @@ export default function Traceability() {
     )
   }
 
-  // Copy Ingredient / Supplier / Country / Batch Number as tab-separated rows,
-  // ready to paste straight into Excel (no header row, no date columns).
-  async function copyForExcel() {
-    if (!results) return
-    const lines = results.map((r) =>
-      [
-        r.ingredientName,
-        r.batch?.supplierName || '',
-        r.batch?.country || '',
-        r.batch ? displayBatchNumber(r.batch) : 'NO BATCH FOUND',
-      ]
-        .map((v) => String(v).replace(/[\t\r\n]+/g, ' '))
-        .join('\t')
-    )
-    const ok = await copyText(lines.join('\r\n'))
+  function selectPack(index) {
+    const pack = activeRecipe.packs[index]
+    setHeader((h) => ({ ...h, packIndex: index, size: pack.size || '', barcode: pack.barcode || '' }))
+  }
+
+  // Ingredient / Supplier / Country / Batch Number for each raw material.
+  function materialRows() {
+    return results.map((r) => [
+      r.ingredientName,
+      r.batch?.supplierName || '',
+      r.batch?.country || '',
+      r.batch ? displayBatchNumber(r.batch) : 'NO BATCH FOUND',
+    ])
+  }
+
+  function reportCopy(which, ok, message) {
     if (ok) {
-      setCopied(true)
-      flash(`Copied ${lines.length} row${lines.length !== 1 ? 's' : ''}. Paste into Excel.`, 'success')
-      setTimeout(() => setCopied(false), 2000)
+      setCopied(which)
+      flash(message, 'success')
+      setTimeout(() => setCopied((c) => (c === which ? null : c)), 2000)
     } else {
       flash('Copy failed. Your browser blocked clipboard access.', 'danger')
     }
+  }
+
+  // Copy the product row plus one row per raw material, spanning the sheet's
+  // columns A-P. Paste into column A of the next empty row.
+  function copyAll() {
+    if (!results) return
+    const rows = buildExcelRows({
+      productionDate: activeProductionDate,
+      recipeName: activeRecipe.name,
+      header: { ...header, barcode: normalizeBarcode(header.barcode) },
+      materials: materialRows(),
+    })
+    reportCopy(
+      'all',
+      copyHtmlTable(rowsToHtml(rows), rowsToTsv(rows)),
+      `Copied ${rows.length} rows. Paste into column A in Excel.`
+    )
+  }
+
+  // Copy only the raw material rows as tab-separated text, ready to paste
+  // into column D (no header row, no date columns).
+  async function copyMaterials() {
+    if (!results) return
+    const lines = materialRows().map((row) =>
+      row.map((v) => String(v).replace(/[\t\r\n]+/g, ' ')).join('\t')
+    )
+    reportCopy(
+      'materials',
+      await copyText(lines.join('\r\n')),
+      `Copied ${lines.length} row${lines.length !== 1 ? 's' : ''}. Paste into column D in Excel.`
+    )
   }
 
   function exportCsv() {
@@ -237,15 +294,24 @@ export default function Traceability() {
                 Production date {formatAuDate(activeProductionDate)}
               </div>
             </div>
-            <div className="d-flex gap-2">
+            <div className="d-flex flex-wrap gap-2">
               <button
                 className="btn btn-sm btn-primary"
-                onClick={copyForExcel}
+                onClick={copyAll}
                 disabled={results.length === 0}
-                title="Copy Ingredient, Supplier Name, Country and Batch Number for Excel"
+                title="Copy the product row and raw materials. Paste into column A in Excel."
               >
-                <i className={`bi ${copied ? 'bi-check-lg' : 'bi-clipboard'} me-1`}></i>
-                {copied ? 'Copied' : 'Copy'}
+                <i className={`bi ${copied === 'all' ? 'bi-check-lg' : 'bi-clipboard'} me-1`}></i>
+                {copied === 'all' ? 'Copied' : 'Copy All'}
+              </button>
+              <button
+                className="btn btn-sm btn-outline-primary"
+                onClick={copyMaterials}
+                disabled={results.length === 0}
+                title="Copy Ingredient, Supplier Name, Country and Batch Number. Paste into column D in Excel."
+              >
+                <i className={`bi ${copied === 'materials' ? 'bi-check-lg' : 'bi-clipboard'} me-1`}></i>
+                {copied === 'materials' ? 'Copied' : 'Copy Materials'}
               </button>
               <button className="btn btn-sm btn-outline-success" onClick={exportCsv}>
                 <i className="bi bi-download me-1"></i>Export CSV
@@ -255,6 +321,60 @@ export default function Traceability() {
 
           {results.length > 0 ? (
             <>
+              <div className="px-4 py-3 border-bottom bg-light">
+                <div className="row g-2">
+                  <div className="col-6 col-md-2">
+                    <div className="form-label small fw-semibold mb-1">Date</div>
+                    <div>{formatAuDate(activeProductionDate)}</div>
+                  </div>
+                  <div className="col-6 col-md-2">
+                    <div className="form-label small fw-semibold mb-1">Product Name</div>
+                    <div>{parseRecipeName(activeRecipe.name).productName}</div>
+                  </div>
+                  <div className="col-6 col-md-1">
+                    <div className="form-label small fw-semibold mb-1">Hoyts BN</div>
+                    <div>{hoytsBatchNumber(activeProductionDate)}</div>
+                  </div>
+                  {activeRecipe.packs?.length > 1 && (
+                    <div className="col-6 col-md-2">
+                      <label className="form-label small fw-semibold mb-1" htmlFor="tr_pack">Pack</label>
+                      <select
+                        id="tr_pack"
+                        className="form-select form-select-sm"
+                        value={header.packIndex}
+                        onChange={(e) => selectPack(Number(e.target.value))}
+                      >
+                        {activeRecipe.packs.map((p, i) => (
+                          <option key={i} value={i}>{p.size || `Pack ${i + 1}`}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  {[
+                    ['size', 'Size'],
+                    ['barcode', 'Label Barcode'],
+                    ['phStart', 'pH Start'],
+                    ['phEnd', 'pH End'],
+                    ['document', 'Document'],
+                  ].map(([key, label]) => (
+                    <div className="col-6 col-md-1" key={key}>
+                      <label className="form-label small fw-semibold mb-1 text-nowrap" htmlFor={`tr_${key}`}>{label}</label>
+                      <input
+                        id={`tr_${key}`}
+                        className="form-control form-control-sm"
+                        value={header[key]}
+                        onChange={(e) => setHeader((h) => ({ ...h, [key]: e.target.value }))}
+                      />
+                    </div>
+                  ))}
+                </div>
+                {(!header.size || !header.barcode) && (
+                  <div className="text-warning small mt-2">
+                    <i className="bi bi-exclamation-triangle me-1"></i>
+                    Size or barcode is empty. Save them on the Recipes page to fill them in next time.
+                  </div>
+                )}
+              </div>
               {missingCount > 0 && (
                 <div className="alert alert-warning rounded-0 border-0 border-bottom border-warning mb-0 py-2 px-4">
                   <i className="bi bi-exclamation-triangle me-1"></i>
