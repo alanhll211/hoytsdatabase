@@ -1,5 +1,6 @@
 import { formatAuDate } from './date'
 import { withTextPrefix } from './batch'
+import { DATE_FORMAT, TEXT_FORMAT, htmlTable } from './excelHtml'
 
 // Builds the traceability block pasted into the production Excel sheet: one
 // grey product row followed by one row per raw material, all spanning the
@@ -69,26 +70,13 @@ export function rowsToTsv(rows) {
     .join('\r\n')
 }
 
-function escapeHtml(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-}
-
-// Excel reads the HTML flavour first. mso-number-format marks each cell as text
-// so codes keep their leading zeros with no visible apostrophe, while the date
-// stays a real date the sheet can sort and filter. Blank cells get no format,
-// so values typed in later (pH, pallet...) aren't forced to text.
+// Blank cells get no format, so values typed in later (pH, pallet...) aren't
+// forced to text.
 export function rowsToHtml(rows) {
-  const body = rows
-    .map((row, r) => {
-      const cells = row.map((v, c) => {
-        const styles = []
-        if (r === 0) styles.push(`background:${HEADER_FILL}`)
-        if (v) styles.push(c === COL.date ? "mso-number-format:'dd\\/mm\\/yyyy'" : "mso-number-format:'\\@'")
-        const attr = styles.length ? ` style="${styles.join(';')}"` : ''
-        return `<td${attr}>${escapeHtml(v)}</td>`
-      })
-      return `<tr>${cells.join('')}</tr>`
-    })
-    .join('')
-  return `<table>${body}</table>`
+  return htmlTable(rows, (v, r, c) => {
+    const styles = []
+    if (r === 0) styles.push(`background:${HEADER_FILL}`)
+    if (v) styles.push(c === COL.date ? DATE_FORMAT : TEXT_FORMAT)
+    return styles
+  })
 }

@@ -3,13 +3,58 @@ import { NavLink, Outlet, Link, useLocation } from 'react-router-dom'
 import { useFlash } from './FlashContext'
 import { useAuth } from './AuthContext'
 
-const NAV_ITEMS = [
-  { to: '/', icon: 'bi-house', label: 'Home', end: true },
-  { to: '/traceability', icon: 'bi-search', label: 'Traceability' },
-  { to: '/batches', icon: 'bi-archive', label: 'Batches' },
-  { to: '/recipes', icon: 'bi-journal-text', label: 'Recipes' },
-  { to: '/ingredients', icon: 'bi-basket2', label: 'Ingredients' },
+// Each site has its own pages; the switch in the nav moves between them.
+const SITES = [
+  {
+    id: 'main',
+    label: '25-27 Alex Ave',
+    short: '25-27',
+    home: '/',
+    items: [
+      { to: '/', icon: 'bi-house', label: 'Home', end: true },
+      { to: '/traceability', icon: 'bi-search', label: 'Traceability' },
+      { to: '/batches', icon: 'bi-archive', label: 'Batches' },
+      { to: '/recipes', icon: 'bi-journal-text', label: 'Recipes' },
+      { to: '/ingredients', icon: 'bi-basket2', label: 'Ingredients' },
+    ],
+  },
+  {
+    id: 'ffs',
+    label: '36-40 Alex Ave (FFS)',
+    short: '36-40 FFS',
+    home: '/ffs',
+    items: [{ to: '/ffs', icon: 'bi-journal-check', label: 'Production Log', end: true }],
+  },
 ]
+
+function siteFor(pathname) {
+  return pathname === '/ffs' || pathname.startsWith('/ffs/') ? SITES[1] : SITES[0]
+}
+
+function SiteSwitch({ current, compact = false }) {
+  return (
+    <nav className="site-switch" aria-label="Site">
+      {SITES.map((s) => (
+        <Link
+          key={s.id}
+          to={s.home}
+          className={s.id === current.id ? 'active' : ''}
+          aria-current={s.id === current.id ? 'true' : undefined}
+          title={s.label}
+        >
+          {compact ? (
+            <>
+              <span className="d-none d-xl-inline">{s.label}</span>
+              <span className="d-xl-none">{s.short}</span>
+            </>
+          ) : (
+            s.label
+          )}
+        </Link>
+      ))}
+    </nav>
+  )
+}
 
 const FLASH_ICONS = {
   success: 'bi-check-circle-fill',
@@ -18,9 +63,9 @@ const FLASH_ICONS = {
   info: 'bi-info-circle-fill',
 }
 
-function Brand() {
+function Brand({ to }) {
   return (
-    <Link className="gnav-brand" to="/">
+    <Link className="gnav-brand" to={to}>
       <span className="brand-mark">
         <i className="bi bi-boxes"></i>
       </span>
@@ -34,6 +79,8 @@ export default function Layout() {
   const { logout } = useAuth()
   const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
+  const site = siteFor(location.pathname)
+  const navItems = site.items
   const [lastPath, setLastPath] = useState(location.pathname)
 
   // Close the mobile menu whenever the route changes (adjusting state during
@@ -60,11 +107,14 @@ export default function Layout() {
     <div className="app-shell">
       <header className={`gnav ${menuOpen ? 'is-open' : ''}`}>
         <div className="gnav-inner">
-          <Brand />
+          <Brand to={site.home} />
+          <div className="d-none d-lg-flex">
+            <SiteSwitch current={site} compact />
+          </div>
 
           {/* Desktop links */}
           <nav className="gnav-links d-none d-lg-flex" aria-label="Main">
-            {NAV_ITEMS.map((item) => (
+            {navItems.map((item) => (
               <NavLink key={item.to} className="gnav-link" to={item.to} end={item.end}>
                 {item.label}
               </NavLink>
@@ -98,8 +148,11 @@ export default function Layout() {
           inert={!menuOpen}
         >
           <ul>
-            {NAV_ITEMS.map((item, i) => (
-              <li key={item.to} style={{ '--i': i }}>
+            <li className="sheet-site" style={{ '--i': 0 }}>
+              <SiteSwitch current={site} />
+            </li>
+            {navItems.map((item, i) => (
+              <li key={item.to} style={{ '--i': i + 1 }}>
                 <NavLink
                   className="sheet-link"
                   to={item.to}
@@ -111,7 +164,7 @@ export default function Layout() {
                 </NavLink>
               </li>
             ))}
-            <li style={{ '--i': NAV_ITEMS.length }}>
+            <li style={{ '--i': navItems.length + 1 }}>
               <button type="button" className="sheet-link sheet-signout" onClick={logout}>
                 <i className="bi bi-box-arrow-left"></i>Sign out
               </button>

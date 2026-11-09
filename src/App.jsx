@@ -8,6 +8,7 @@ import Traceability from './pages/Traceability'
 import Batches from './pages/Batches'
 import Recipes from './pages/Recipes'
 import Ingredients from './pages/Ingredients'
+import FfsLog from './pages/FfsLog'
 import './appCustom.css'
 
 function RequireAuth({ children }) {
@@ -38,6 +39,7 @@ function App() {
               <Route path="/batches" element={<Batches />} />
               <Route path="/recipes" element={<Recipes />} />
               <Route path="/ingredients" element={<Ingredients />} />
+              <Route path="/ffs" element={<FfsLog />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>
           </Routes>

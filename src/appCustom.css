@@ -909,3 +909,127 @@ a:hover { text-decoration: underline; }
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ============================================================
+   Site switch (25-27 Alex Ave / 36-40 Alex Ave FFS)
+   ============================================================ */
+.site-switch {
+  display: flex;
+  flex-shrink: 0;
+  padding: 3px;
+  gap: 2px;
+  background: var(--fill-2);
+  border-radius: 980px;
+}
+.site-switch a {
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 0.22rem 0.75rem;
+  border-radius: 980px;
+  white-space: nowrap;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+.site-switch a:hover { color: var(--ink); text-decoration: none; }
+.site-switch a.active {
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  font-weight: 600;
+}
+.sheet-site { margin-bottom: 0.75rem; }
+.sheet-site .site-switch { width: fit-content; max-width: 100%; }
+.sheet-site .site-switch a { font-size: 0.9rem; padding: 0.4rem 0.9rem; }
+
+/* ============================================================
+   Combo input: free text plus a dropdown of previous values
+   ============================================================ */
+.combo { position: relative; }
+.combo-menu {
+  position: absolute;
+  z-index: 1070;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: min(420px, 90vw);
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--hairline-soft);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-pop);
+}
+.combo-option {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 7px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.combo-option.active { background: var(--accent-soft); }
+.combo-value { overflow-wrap: anywhere; }
+.combo-hint {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.combo-group {
+  padding: 0.5rem 0.65rem 0.2rem;
+  color: var(--faint);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.combo-empty { padding: 0.5rem 0.65rem; color: var(--muted); font-size: 0.85rem; }
+
+/* Dialogs holding combo inputs let the dropdown spill past the card edge. */
+.modal-content.allow-overflow { overflow: visible; }
+.modal-dialog.modal-wide { max-width: 880px; }
+
+/* ============================================================
+   FFS production log
+   ============================================================ */
+/* All seven machines stay on one row, even on a phone. */
+.machine-picker { display: flex; gap: 6px; }
+.machine-picker button {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 48px;
+  height: 38px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+.machine-picker button:hover { border-color: var(--accent); color: var(--accent); }
+.machine-picker button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ffs-line {
+  padding: 0.75rem;
+  margin-bottom: 0.6rem;
+  border: 1px solid var(--hairline-soft);
+  border-radius: var(--radius-sm);
+}
+.machine-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--fill-2);
+  font-weight: 600;
+}
+.ffs-table td { vertical-align: top; }
+.ffs-table tr.line-cont > td.line-cell { border-bottom-color: transparent; }
