@@ -1,10 +1,13 @@
-import { Fragment, useId, useRef, useState } from 'react'
+import { Fragment, useEffect, useId, useRef, useState } from 'react'
 
 // Free-text input with a dropdown of previous values. Picking an option (by
 // click, Enter, or typing it exactly) calls onPick so the caller can fill in
 // related fields. Anything can still be typed, and every field stays editable.
+// On touch screens the chevron opens the list without raising the keyboard;
+// tapping the text box itself is what brings the keyboard up.
 //
 // options: [{ value, hint?, group? }]
+// selectOnFocus: select the whole value on focus so typing replaces it.
 export default function ComboInput({
   id,
   value,
@@ -14,13 +17,17 @@ export default function ComboInput({
   placeholder,
   ariaLabel,
   required,
+  selectOnFocus = false,
   emptyText = 'No previous entries',
 }) {
   const autoId = useId()
   const inputId = id || autoId
   const listId = `${inputId}-list`
+  const rootRef = useRef(null)
   const inputRef = useRef(null)
   const lastPicked = useRef(null)
+  // Pointer type of the last chevron press: 'mouse', 'touch' or 'pen'.
+  const chevronPointer = useRef('mouse')
   const [open, setOpen] = useState(false)
   // Text the list is narrowed by; empty shows every option.
   const [filter, setFilter] = useState('')
@@ -31,6 +38,17 @@ export default function ComboInput({
   // While typing, hide the menu once nothing matches; the button still opens
   // it to show the empty message.
   const showMenu = open && (shown.length > 0 || !f)
+
+  // The list can be open without the text box focused (opened by touch), so
+  // a tap anywhere outside the field closes it.
+  useEffect(() => {
+    if (!open) return
+    const close = (e) => {
+      if (!rootRef.current?.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', close, true)
+    return () => document.removeEventListener('pointerdown', close, true)
+  }, [open])
 
   function pick(option) {
     lastPicked.current = option.value
@@ -77,7 +95,7 @@ export default function ComboInput({
   }
 
   return (
-    <div className="combo">
+    <div className="combo" ref={rootRef}>
       <div className="input-group">
         <input
           ref={inputRef}
@@ -95,19 +113,41 @@ export default function ComboInput({
           value={value}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          onBlur={() => setOpen(false)}
+          onFocus={(e) => {
+            if (!selectOnFocus) return
+            const el = e.target
+            const text = el.value
+            el.select()
+            // A tap can move the caret after focus; select again unless
+            // typing has already started.
+            setTimeout(() => {
+              if (el.value === text) el.setSelectionRange(0, text.length)
+            }, 0)
+          }}
+          onBlur={(e) => {
+            if (!rootRef.current?.contains(e.relatedTarget)) setOpen(false)
+          }}
         />
         <button
           type="button"
           className="btn btn-outline-secondary"
           tabIndex={-1}
           aria-label="Show previous values"
+          onPointerDown={(e) => {
+            chevronPointer.current = e.pointerType
+          }}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => {
+            const touch = chevronPointer.current === 'touch' || chevronPointer.current === 'pen'
+            const next = !open
+            // Mouse users keep typing and arrow keys; on touch, drop the
+            // keyboard so the whole list is visible. Blur runs first: its
+            // handler closes the list, and setOpen(next) below wins.
+            if (touch) inputRef.current?.blur()
+            else inputRef.current?.focus()
             setFilter('')
             setActive(-1)
-            setOpen((o) => !o)
-            inputRef.current?.focus()
+            setOpen(next)
           }}
         >
           <i className="bi bi-chevron-down"></i>

@@ -1,4 +1,4 @@
-import { formatAuDate } from './date'
+import { formatAuDate, parseAuDate } from './date'
 import { withTextPrefix } from './batch'
 import { DATE_FORMAT, TEXT_FORMAT, htmlTable } from './excelHtml'
 
@@ -24,12 +24,28 @@ export function sortEntryOrder(entries) {
   return [...entries].sort((a, b) => createdMs(a) - createdMs(b))
 }
 
+// Every run on one production date (DD/MM/YYYY), in the order they were
+// entered. null when the date can't be read.
+export function entriesOnDay(entries, dateText) {
+  const d = parseAuDate(dateText)
+  if (!d) return null
+  const key = formatAuDate(d)
+  return sortEntryOrder(entries.filter((e) => formatAuDate(e.date) === key))
+}
+
+// Rows a list of runs takes in the sheet: one per raw material line.
+export const rowCount = (entries) => entries.reduce((n, e) => n + Math.max(e.lines?.length || 0, 1), 0)
+
 // The functions below take `history` sorted newest first, so the first match
 // is the last time something was used.
 
 export function lastEntryFor(history, productName) {
   const key = norm(productName)
   return key ? history.find((e) => norm(e.productName) === key) || null : null
+}
+
+export function lastEntryOnMachine(history, machine) {
+  return history.find((e) => Number(e.machine) === Number(machine)) || null
 }
 
 export function productOptions(history) {

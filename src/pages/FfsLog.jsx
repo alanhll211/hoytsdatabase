@@ -23,7 +23,10 @@ import {
   emptyLine,
   sortNewestFirst,
   sortEntryOrder,
+  entriesOnDay,
+  rowCount,
   lastEntryFor,
+  lastEntryOnMachine,
   productOptions,
   supplierOptions,
   fillForSupplier,
@@ -50,6 +53,9 @@ function blankForm(date) {
     weightPerBag: '',
     unitsPerBox: '',
     lines: [emptyLine()],
+    // { machine, date } while the product fields still hold a machine's last
+    // run untouched, so tapping another machine can swap them.
+    machineFill: null,
   }
 }
 
@@ -72,8 +78,20 @@ function formFromEntry(e) {
     weightPerBag: e.weightPerBag || '',
     unitsPerBox: e.unitsPerBox || '',
     lines: e.lines?.length ? e.lines.map(cleanLine) : [emptyLine()],
+    machineFill: null,
   }
 }
+
+// Weight, units and raw materials copied from an earlier run.
+const runDetails = (e) => ({
+  weightPerBag: e.weightPerBag || '',
+  unitsPerBox: e.unitsPerBox || '',
+  lines: e.lines?.length ? e.lines.map(cleanLine) : [emptyLine()],
+})
+const noProduct = { productName: '', weightPerBag: '', unitsPerBox: '', lines: [emptyLine()] }
+const PRODUCT_FIELDS = new Set(['productName', 'weightPerBag', 'unitsPerBox'])
+const hasProductInput = (f) =>
+  [f.productName, f.weightPerBag, f.unitsPerBox, ...f.lines.flatMap(Object.values)].some((v) => str(v))
 
 const dash = <span className="text-muted">—</span>
 
@@ -95,6 +113,9 @@ export default function FfsLog() {
   const [formKey, setFormKey] = useState(0)
   const [saving, setSaving] = useState(false)
   const [copiedKey, setCopiedKey] = useState(null)
+  // Date for "Copy a day". null follows the latest production day until a
+  // date is picked or typed.
+  const [copyDate, setCopyDate] = useState(null)
 
   useEffect(
     () =>
@@ -118,6 +139,24 @@ export default function FfsLog() {
     () => (editingId ? history.filter((e) => e.id !== editingId) : history),
     [history, editingId]
   )
+
+  // Every run on the picked day, whatever the list filters show.
+  const copyDay = copyDate ?? formatAuDate(history[0]?.date ?? new Date())
+  const copyDayEntries = useMemo(() => entriesOnDay(history, copyDay), [history, copyDay])
+  const copyDayKey = `pick:${copyDay}`
+  const copySummary = useMemo(() => {
+    if (!copyDayEntries?.length) return null
+    const runs = copyDayEntries.length
+    const rows = rowCount(copyDayEntries)
+    const machines = [...new Set(copyDayEntries.map((e) => e.machine))].sort((a, b) => a - b)
+    return {
+      date: formatAuDate(copyDayEntries[0].date),
+      runs: `${runs} run${runs !== 1 ? 's' : ''}`,
+      rows: `${rows} row${rows !== 1 ? 's' : ''}`,
+      machines: `Machine${machines.length !== 1 ? 's' : ''} ${machines.join(', ')}`,
+      products: [...new Set(copyDayEntries.map((e) => e.productName))].join(', '),
+    }
+  }, [copyDayEntries])
 
   const productName = form?.productName ?? ''
   const productOpts = useMemo(() => productOptions(past), [past])
@@ -170,9 +209,34 @@ export default function FfsLog() {
     setEditingId(null)
   }
 
-  const setField = (key, value) => setForm((f) => ({ ...f, [key]: value }))
+  // Any change to the product fields keeps them from being swapped by a
+  // later machine tap.
+  const setField = (key, value) =>
+    setForm((f) => ({ ...f, [key]: value, ...(PRODUCT_FIELDS.has(key) ? { machineFill: null } : {}) }))
   const setLine = (i, patch) =>
-    setForm((f) => ({ ...f, lines: f.lines.map((l, x) => (x === i ? { ...l, ...patch } : l)) }))
+    setForm((f) => ({
+      ...f,
+      lines: f.lines.map((l, x) => (x === i ? { ...l, ...patch } : l)),
+      machineFill: null,
+    }))
+  const setLines = (fn) => setForm((f) => ({ ...f, lines: fn(f.lines), machineFill: null }))
+
+  // Tapping a machine fills in its last run, as long as no product has been
+  // typed or picked yet. Another machine tap swaps in that machine's last run.
+  function pickMachine(m) {
+    setForm((f) => {
+      const next = { ...f, machine: String(m) }
+      if (!f.machineFill && hasProductInput(f)) return next
+      const last = lastEntryOnMachine(past, m)
+      if (!last) return f.machineFill ? { ...next, ...noProduct, machineFill: null } : next
+      return {
+        ...next,
+        productName: last.productName || '',
+        ...runDetails(last),
+        machineFill: { machine: m, date: formatAuDate(last.date) },
+      }
+    })
+  }
 
   function setDate(value) {
     setForm((f) => {
@@ -192,12 +256,7 @@ export default function FfsLog() {
   function pickProduct(option) {
     const last = lastEntryFor(past, option.value)
     if (!last) return
-    setForm((f) => ({
-      ...f,
-      weightPerBag: last.weightPerBag || '',
-      unitsPerBox: last.unitsPerBox || '',
-      lines: last.lines?.length ? last.lines.map(cleanLine) : [emptyLine()],
-    }))
+    setForm((f) => ({ ...f, ...runDetails(last), machineFill: null }))
   }
 
   function pickSupplier(i, option) {
@@ -208,6 +267,7 @@ export default function FfsLog() {
           ? { ...l, supplier: option.value, ...fillForSupplier(past, f.productName, option.value, l.internalIngredient) }
           : l
       ),
+      machineFill: null,
     }))
   }
 
@@ -219,13 +279,19 @@ export default function FfsLog() {
           ? { ...l, internalIngredient: option.value, ...fillForInternal(past, f.productName, option.value) }
           : l
       ),
+      machineFill: null,
     }))
   }
 
   function pickWeight(option) {
     setForm((f) => {
       const units = unitsForWeight(past, f.productName, option.value)
-      return { ...f, weightPerBag: option.value, ...(units === null ? {} : { unitsPerBox: units }) }
+      return {
+        ...f,
+        weightPerBag: option.value,
+        ...(units === null ? {} : { unitsPerBox: units }),
+        machineFill: null,
+      }
     })
   }
 
@@ -292,11 +358,12 @@ export default function FfsLog() {
     }
   }
 
-  function copyEntries(list, key) {
+  function copyEntries(list, key, label = '') {
     const rows = buildFfsRows(list)
     if (copyHtmlTable(ffsRowsToHtml(rows), ffsRowsToTsv(rows))) {
       setCopiedKey(key)
-      flash(`Copied ${rows.length} row${rows.length !== 1 ? 's' : ''}. Paste into column A in Excel.`, 'success')
+      const what = `${rows.length} row${rows.length !== 1 ? 's' : ''}${label ? ` ${label}` : ''}`
+      flash(`Copied ${what}. Paste into column A in Excel.`, 'success')
       setTimeout(() => setCopiedKey((c) => (c === key ? null : c)), 2000)
     } else {
       flash('Copy failed. Your browser blocked clipboard access.', 'danger')
@@ -377,6 +444,48 @@ export default function FfsLog() {
         <button className="btn btn-primary" onClick={() => startForm(null, blankForm(new Date()))}>
           <i className="bi bi-plus-lg me-1"></i>Add Entry
         </button>
+      </div>
+
+      {/* Copy every run of one day, all machines, for the FFS sheet */}
+      <div className="card mb-3">
+        <div className="card-body py-3">
+          <div className="row g-2 align-items-end">
+            <div className="col-md-3">
+              <label className="form-label" htmlFor="ffs_copy_date">
+                Copy a day for Excel
+              </label>
+              <DatePickInput id="ffs_copy_date" value={copyDay} onChange={setCopyDate} />
+            </div>
+            <div className="col-md-6 copy-day-summary" aria-live="polite">
+              {!loaded ? null : !copyDayEntries ? (
+                <span className="text-danger">Enter the date as DD/MM/YYYY.</span>
+              ) : !copySummary ? (
+                <span className="text-muted">No runs on {formatAuDate(parseAuDate(copyDay))}.</span>
+              ) : (
+                <>
+                  <div className="fw-medium">
+                    {copySummary.runs} · {copySummary.rows} · {copySummary.machines}
+                  </div>
+                  <div className="text-muted small" title={copySummary.products}>
+                    {copySummary.products}
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="col-md-3 d-flex">
+              <button
+                className="btn btn-primary flex-fill"
+                disabled={!copySummary}
+                onClick={() =>
+                  copyEntries(copyDayEntries, copyDayKey, `(${copySummary.runs} on ${copySummary.date})`)
+                }
+              >
+                <i className={`bi ${copiedKey === copyDayKey ? 'bi-check-lg' : 'bi-clipboard'} me-1`}></i>
+                {copiedKey === copyDayKey ? 'Copied' : 'Copy All Products'}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Filters */}
@@ -518,13 +627,19 @@ export default function FfsLog() {
                                 role="radio"
                                 aria-checked={on}
                                 className={on ? 'on' : ''}
-                                onClick={() => setField('machine', String(m))}
+                                onClick={() => pickMachine(m)}
                               >
                                 {m}
                               </button>
                             )
                           })}
                         </div>
+                        {form.machineFill && (
+                          <div className="form-text">
+                            Filled in from machine {form.machineFill.machine}'s last run on {form.machineFill.date}.
+                            Change anything that's different.
+                          </div>
+                        )}
                       </div>
                       <div className="col-md-8">
                         <label className="form-label fw-semibold" htmlFor="ffs_product">
@@ -536,6 +651,7 @@ export default function FfsLog() {
                           onChange={(v) => setField('productName', v)}
                           onPick={pickProduct}
                           options={productOpts}
+                          selectOnFocus={!!form.machineFill}
                           placeholder="e.g. Cumin Ground"
                           required
                           emptyText="No products yet. Type a new one."
@@ -660,7 +776,7 @@ export default function FfsLog() {
                                 type="button"
                                 className="btn btn-outline-danger btn-icon"
                                 title="Remove line"
-                                onClick={() => setForm((f) => ({ ...f, lines: f.lines.filter((_, x) => x !== i) }))}
+                                onClick={() => setLines((lines) => lines.filter((_, x) => x !== i))}
                               >
                                 <i className="bi bi-trash"></i>
                               </button>
@@ -672,7 +788,7 @@ export default function FfsLog() {
                     <button
                       type="button"
                       className="btn btn-sm btn-outline-secondary"
-                      onClick={() => setForm((f) => ({ ...f, lines: [...f.lines, emptyLine()] }))}
+                      onClick={() => setLines((lines) => [...lines, emptyLine()])}
                     >
                       <i className="bi bi-plus-lg me-1"></i>Add Line
                     </button>

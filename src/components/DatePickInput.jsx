@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import flatpickr from 'flatpickr'
 
-export default function DatePickInput({ value, onChange, placeholder, required, name }) {
+export default function DatePickInput({ id, value, onChange, placeholder, required, name }) {
   const inputRef = useRef(null)
   const fpRef = useRef(null)
   const onChangeRef = useRef(onChange)
@@ -30,6 +30,7 @@ export default function DatePickInput({ value, onChange, placeholder, required, 
     <div className="input-group">
       <input
         ref={inputRef}
+        id={id}
         type="text"
         name={name}
         defaultValue={value}
