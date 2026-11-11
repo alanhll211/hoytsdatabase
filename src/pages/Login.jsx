@@ -1,23 +1,30 @@
 import { useState } from 'react'
 import { useNavigate, useLocation, Navigate } from 'react-router-dom'
 import { useAuth } from '../AuthContext'
+import { canOpen, homeFor, profileFor } from '../permissions'
+
+// Where to go after signing in: the page they were headed to if they can
+// open it, otherwise their own home page.
+function destination(profile, from) {
+  return from && canOpen(profile, from) ? from : homeFor(profile)
+}
 
 export default function Login() {
-  const { user, login } = useAuth()
+  const { profile, login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [username, setUsername] = useState('')
   const [error, setError] = useState('')
 
   // Already signed in — send them where they were headed (or Home).
-  if (user) {
-    return <Navigate to={location.state?.from || '/'} replace />
+  if (profile) {
+    return <Navigate to={destination(profile, location.state?.from)} replace />
   }
 
   function handleSubmit(e) {
     e.preventDefault()
     if (login(username)) {
-      navigate(location.state?.from || '/', { replace: true })
+      navigate(destination(profileFor(username), location.state?.from), { replace: true })
     } else {
       setError('Access denied. Please check your username and try again.')
     }

@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore'
 import { db } from '../firebase'
 import { useFlash } from '../FlashContext'
+import { useAuth } from '../AuthContext'
 import { formatAuDate } from '../utils/date'
 import { PH_NOT_TESTED, normalizeBarcode } from '../utils/excelRow'
 
@@ -105,6 +106,7 @@ function ProductFields({ idPrefix, value, onChange }) {
 
 export default function Recipes() {
   const { flash } = useFlash()
+  const { profile } = useAuth()
   const [recipes, setRecipes] = useState([])
   const [ingredients, setIngredients] = useState([])
   const [q, setQ] = useState('')
@@ -238,6 +240,7 @@ export default function Recipes() {
   }
 
   async function handleDelete(recipe) {
+    if (!profile.canDelete) return
     if (!confirm(`Delete recipe '${recipe.name}'?`)) return
     await deleteDoc(doc(db, 'recipes', recipe.id))
     flash(`Recipe "${recipe.name}" deleted.`, 'success')
@@ -344,13 +347,15 @@ export default function Recipes() {
                             >
                               <i className="bi bi-pencil"></i>
                             </button>
-                            <button
-                              className="btn btn-sm btn-outline-danger btn-icon"
-                              title="Delete"
-                              onClick={() => handleDelete(recipe)}
-                            >
-                              <i className="bi bi-trash"></i>
-                            </button>
+                            {profile.canDelete && (
+                              <button
+                                className="btn btn-sm btn-outline-danger btn-icon"
+                                title="Delete"
+                                onClick={() => handleDelete(recipe)}
+                              >
+                                <i className="bi bi-trash"></i>
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, Outlet, Link, useLocation } from 'react-router-dom'
 import { useFlash } from './FlashContext'
 import { useAuth } from './AuthContext'
+import { siteForPath } from './permissions'
 
 // Each site has its own pages; the switch in the nav moves between them.
 const SITES = [
@@ -13,6 +14,7 @@ const SITES = [
     items: [
       { to: '/', icon: 'bi-house', label: 'Home', end: true },
       { to: '/traceability', icon: 'bi-search', label: 'Traceability' },
+      { to: '/daily', icon: 'bi-calendar-check', label: 'Daily Log' },
       { to: '/batches', icon: 'bi-archive', label: 'Batches' },
       { to: '/recipes', icon: 'bi-journal-text', label: 'Recipes' },
       { to: '/ingredients', icon: 'bi-basket2', label: 'Ingredients' },
@@ -27,14 +29,10 @@ const SITES = [
   },
 ]
 
-function siteFor(pathname) {
-  return pathname === '/ffs' || pathname.startsWith('/ffs/') ? SITES[1] : SITES[0]
-}
-
-function SiteSwitch({ current, compact = false }) {
+function SiteSwitch({ sites, current, compact = false }) {
   return (
     <nav className="site-switch" aria-label="Site">
-      {SITES.map((s) => (
+      {sites.map((s) => (
         <Link
           key={s.id}
           to={s.home}
@@ -44,8 +42,8 @@ function SiteSwitch({ current, compact = false }) {
         >
           {compact ? (
             <>
-              <span className="d-none d-xl-inline">{s.label}</span>
-              <span className="d-xl-none">{s.short}</span>
+              <span className="d-none d-xxl-inline">{s.label}</span>
+              <span className="d-xxl-none">{s.short}</span>
             </>
           ) : (
             s.label
@@ -76,10 +74,12 @@ function Brand({ to }) {
 
 export default function Layout() {
   const { messages, dismiss } = useFlash()
-  const { logout } = useAuth()
+  const { profile, logout } = useAuth()
   const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
-  const site = siteFor(location.pathname)
+  // Sites this user can't open are left out entirely, switch included.
+  const sites = SITES.filter((s) => profile.sites.includes(s.id))
+  const site = sites.find((s) => s.id === siteForPath(location.pathname)) || sites[0]
   const navItems = site.items
   const [lastPath, setLastPath] = useState(location.pathname)
 
@@ -108,9 +108,11 @@ export default function Layout() {
       <header className={`gnav ${menuOpen ? 'is-open' : ''}`}>
         <div className="gnav-inner">
           <Brand to={site.home} />
-          <div className="d-none d-lg-flex">
-            <SiteSwitch current={site} compact />
-          </div>
+          {sites.length > 1 && (
+            <div className="d-none d-lg-flex">
+              <SiteSwitch sites={sites} current={site} compact />
+            </div>
+          )}
 
           {/* Desktop links */}
           <nav className="gnav-links d-none d-lg-flex" aria-label="Main">
@@ -121,9 +123,15 @@ export default function Layout() {
             ))}
           </nav>
 
-          <button type="button" className="gnav-signout d-none d-lg-inline-flex" onClick={logout}>
-            Sign out
-          </button>
+          <div className="gnav-user d-none d-lg-flex">
+            <span className="user-chip" title="Signed in as">
+              <i className="bi bi-person-circle"></i>
+              {profile.name}
+            </span>
+            <button type="button" className="gnav-signout" onClick={logout}>
+              Sign out
+            </button>
+          </div>
 
           {/* Mobile menu toggle */}
           <button
@@ -148,9 +156,11 @@ export default function Layout() {
           inert={!menuOpen}
         >
           <ul>
-            <li className="sheet-site" style={{ '--i': 0 }}>
-              <SiteSwitch current={site} />
-            </li>
+            {sites.length > 1 && (
+              <li className="sheet-site" style={{ '--i': 0 }}>
+                <SiteSwitch sites={sites} current={site} />
+              </li>
+            )}
             {navItems.map((item, i) => (
               <li key={item.to} style={{ '--i': i + 1 }}>
                 <NavLink
@@ -166,7 +176,7 @@ export default function Layout() {
             ))}
             <li style={{ '--i': navItems.length + 1 }}>
               <button type="button" className="sheet-link sheet-signout" onClick={logout}>
-                <i className="bi bi-box-arrow-left"></i>Sign out
+                <i className="bi bi-box-arrow-left"></i>Sign out ({profile.name})
               </button>
             </li>
           </ul>

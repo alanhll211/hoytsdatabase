@@ -14,6 +14,10 @@ export default function DatePickInput({ id, value, onChange, placeholder, requir
     fpRef.current = flatpickr(inputRef.current, {
       dateFormat: 'd/m/Y',
       allowInput: true,
+      // Same calendar on phones. flatpickr's native mobile input hides the
+      // original box, and React shows it again on the next render, leaving
+      // two date boxes side by side.
+      disableMobile: true,
       appendTo: document.body,
       onChange: (_dates, dateStr) => onChangeRef.current(dateStr),
     })

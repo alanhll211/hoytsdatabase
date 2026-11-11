@@ -13,6 +13,8 @@ import {
 } from 'firebase/firestore'
 import { db } from '../firebase'
 import { useFlash } from '../FlashContext'
+import { useAuth } from '../AuthContext'
+import { displayName } from '../permissions'
 import DatePickInput from '../components/DatePickInput'
 import ComboInput from '../components/ComboInput'
 import { parseAuDate, formatAuDate } from '../utils/date'
@@ -97,6 +99,7 @@ const dash = <span className="text-muted">—</span>
 
 export default function FfsLog() {
   const { flash } = useFlash()
+  const { user, profile } = useAuth()
   const [entries, setEntries] = useState([])
   const [loaded, setLoaded] = useState(false)
 
@@ -326,11 +329,11 @@ export default function FfsLog() {
     setSaving(true)
     try {
       if (editingId) {
-        await updateDoc(doc(db, COLLECTION, editingId), data)
+        await updateDoc(doc(db, COLLECTION, editingId), { ...data, updatedBy: user, updatedAt: serverTimestamp() })
         flash(`Updated ${name} on machine ${data.machine}.`, 'success')
         closeForm()
       } else {
-        await addDoc(collection(db, COLLECTION), { ...data, createdAt: serverTimestamp() })
+        await addDoc(collection(db, COLLECTION), { ...data, createdAt: serverTimestamp(), createdBy: user })
         flash(`Saved ${name} on machine ${data.machine}.`, 'success')
         if (addAnother) {
           // Next run is usually the same day and Hoyts batch, so keep both.
@@ -348,6 +351,7 @@ export default function FfsLog() {
   }
 
   async function handleDelete(entry) {
+    if (!profile.canDelete) return
     if (!confirm(`Delete ${entry.productName} (machine ${entry.machine}) on ${formatAuDate(entry.date)}?`)) return
     try {
       await deleteDoc(doc(db, COLLECTION, entry.id))
@@ -382,8 +386,15 @@ export default function FfsLog() {
           </td>
         )}
         {i === 0 && (
-          <td rowSpan={n} className="fw-medium">
-            {e.productName}
+          <td rowSpan={n}>
+            <div className="fw-medium">{e.productName}</div>
+            {/* ALAN sees who entered and last changed each run. */}
+            {profile.isAdmin && e.createdBy && (
+              <div className="text-muted small">
+                by {displayName(e.createdBy)}
+                {e.updatedBy && e.updatedBy !== e.createdBy ? `, edited by ${displayName(e.updatedBy)}` : ''}
+              </div>
+            )}
           </td>
         )}
         <td className="line-cell">{l.internalIngredient || dash}</td>
@@ -418,13 +429,15 @@ export default function FfsLog() {
               >
                 <i className="bi bi-pencil"></i>
               </button>
-              <button
-                className="btn btn-sm btn-outline-danger btn-icon"
-                title="Delete"
-                onClick={() => handleDelete(e)}
-              >
-                <i className="bi bi-trash"></i>
-              </button>
+              {profile.canDelete && (
+                <button
+                  className="btn btn-sm btn-outline-danger btn-icon"
+                  title="Delete"
+                  onClick={() => handleDelete(e)}
+                >
+                  <i className="bi bi-trash"></i>
+                </button>
+              )}
             </div>
           </td>
         )}

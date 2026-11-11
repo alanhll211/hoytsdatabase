@@ -7,11 +7,16 @@ import {
   limit,
   getDocs,
   onSnapshot,
+  addDoc,
+  serverTimestamp,
   Timestamp,
 } from 'firebase/firestore'
 import { db } from '../firebase'
 import { useFlash } from '../FlashContext'
+import { useAuth } from '../AuthContext'
+import { displayName } from '../permissions'
 import DatePickInput from '../components/DatePickInput'
+import NewBatchModal from '../components/NewBatchModal'
 import { parseAuDate, formatAuDate, formatAuDateTime, formatDdmmyy } from '../utils/date'
 import { downloadCsv } from '../utils/csv'
 import { withTextPrefix } from '../utils/batch'
@@ -26,9 +31,13 @@ import {
   rowsToTsv,
 } from '../utils/excelRow'
 
-function initialHeader(recipe) {
+const ms = (t) => t?.toMillis?.() ?? 0
+
+function initialHeader(recipe, productionDate) {
   const pack = recipe.packs?.[0]
   return {
+    // Batch number defaults to the production date's Julian code (DDDYY).
+    hoytsBn: hoytsBatchNumber(productionDate),
     packIndex: 0,
     size: pack?.size || '',
     barcode: pack?.barcode || '',
@@ -40,11 +49,12 @@ function initialHeader(recipe) {
 
 export default function Traceability() {
   const { flash } = useFlash()
+  const { user } = useAuth()
   const [recipes, setRecipes] = useState([])
   const [ingredients, setIngredients] = useState([])
 
   const [selectedRecipeId, setSelectedRecipeId] = useState('')
-  const [productionDateStr, setProductionDateStr] = useState('')
+  const [productionDateStr, setProductionDateStr] = useState(() => formatAuDate(new Date()))
 
   const [results, setResults] = useState(null)
   const [activeRecipe, setActiveRecipe] = useState(null)
@@ -54,6 +64,11 @@ export default function Traceability() {
   const [copied, setCopied] = useState(null)
   // Grey-row values for this lookup only; recipe defaults are edited on Recipes.
   const [header, setHeader] = useState(null)
+  // Result row whose ingredient is getting a new batch (dialog open).
+  const [newBatchFor, setNewBatchFor] = useState(null)
+  const [pushing, setPushing] = useState(false)
+  // Recipe, date and batch number of the last successful push.
+  const [pushedKey, setPushedKey] = useState(null)
 
   useEffect(() => {
     const unsubRecipes = onSnapshot(query(collection(db, 'recipes'), orderBy('name')), (snap) =>
@@ -78,7 +93,9 @@ export default function Traceability() {
     const cutoff = Timestamp.fromDate(productionDate)
 
     // Query each distinct ingredient only once, even if it appears more than
-    // once in the recipe, to avoid duplicate Firestore reads.
+    // once in the recipe, to avoid duplicate Firestore reads. A few recent
+    // batches are read so that, when two share a received date, the one
+    // entered last wins (e.g. a new bag recorded the same day).
     const uniqueIds = [...new Set(ingredientIds)]
     const batchByIngredient = new Map()
     await Promise.all(
@@ -89,13 +106,17 @@ export default function Traceability() {
             where('ingredientId', '==', ingredientId),
             where('receivedDate', '<=', cutoff),
             orderBy('receivedDate', 'desc'),
-            limit(1)
+            limit(10)
           )
         )
-        batchByIngredient.set(
-          ingredientId,
-          snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data() }
-        )
+        const latest = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .sort(
+            (a, b) =>
+              ms(b.receivedDate) - ms(a.receivedDate) ||
+              (b.createdAt ? ms(b.createdAt) : Infinity) - (a.createdAt ? ms(a.createdAt) : Infinity)
+          )[0]
+        batchByIngredient.set(ingredientId, latest || null)
       })
     )
 
@@ -135,8 +156,9 @@ export default function Traceability() {
       setResults(items)
       setActiveRecipe(recipe)
       setActiveProductionDate(productionDate)
-      setHeader(initialHeader(recipe))
+      setHeader(initialHeader(recipe, productionDate))
       setCopied(null)
+      setPushedKey(null)
     } finally {
       setRunning(false)
     }
@@ -149,6 +171,64 @@ export default function Traceability() {
     return withTextPrefix(
       batch.useCurrentDate ? formatDdmmyy(activeProductionDate) : batch.batchNumber
     )
+  }
+
+  // Reload the raw materials after a new batch, keeping the edited grey row.
+  async function refreshResults() {
+    setResults(await runTraceability(activeRecipe, activeProductionDate))
+  }
+
+  function handleBatchSaved(receivedDate) {
+    setNewBatchFor(null)
+    if (receivedDate > activeProductionDate) {
+      flash('That batch was received after the production date, so this lookup still shows the earlier one.', 'warning')
+    }
+    refreshResults()
+  }
+
+  const pushKey = activeRecipe && header ? `${activeRecipe.id}|${formatAuDate(activeProductionDate)}|${header.hoytsBn.trim()}` : ''
+
+  // Push records today's product to the Daily Log: date, product and batch
+  // number, plus who pushed it.
+  async function push() {
+    if (pushing || !activeRecipe) return
+    const batchNumber = header.hoytsBn.trim()
+    if (!batchNumber) {
+      flash('Enter the batch number before pushing.', 'danger')
+      return
+    }
+    const productName = parseRecipeName(activeRecipe.name).productName
+    const date = Timestamp.fromDate(activeProductionDate)
+    setPushing(true)
+    try {
+      const sameDay = await getDocs(query(collection(db, 'dailyProduction'), where('date', '==', date)))
+      const earlier = sameDay.docs.map((d) => d.data()).find((d) => d.recipeId === activeRecipe.id)
+      if (
+        earlier &&
+        !confirm(
+          `${productName} was already pushed for ${formatAuDate(activeProductionDate)} ` +
+            `(batch ${earlier.batchNumber}, by ${displayName(earlier.pushedBy)}). Push it again?`
+        )
+      ) {
+        return
+      }
+      await addDoc(collection(db, 'dailyProduction'), {
+        date,
+        recipeId: activeRecipe.id,
+        recipeName: activeRecipe.name,
+        productName,
+        batchNumber,
+        pushedBy: user,
+        createdAt: serverTimestamp(),
+      })
+      setPushedKey(pushKey)
+      flash(`Pushed ${productName} (batch ${batchNumber}) to the Daily Log.`, 'success')
+    } catch (err) {
+      console.error(err)
+      flash('Could not push. Please try again.', 'danger')
+    } finally {
+      setPushing(false)
+    }
   }
 
   function selectPack(index) {
@@ -296,6 +376,15 @@ export default function Traceability() {
             </div>
             <div className="d-flex flex-wrap gap-2">
               <button
+                className="btn btn-sm btn-success"
+                onClick={push}
+                disabled={pushing}
+                title="Save this product and batch number to the Daily Log"
+              >
+                <i className={`bi ${pushedKey === pushKey ? 'bi-check-lg' : 'bi-send'} me-1`}></i>
+                {pushing ? 'Pushing…' : pushedKey === pushKey ? 'Pushed' : 'Push'}
+              </button>
+              <button
                 className="btn btn-sm btn-primary"
                 onClick={copyAll}
                 disabled={results.length === 0}
@@ -322,7 +411,7 @@ export default function Traceability() {
           {results.length > 0 ? (
             <>
               <div className="px-4 py-3 border-bottom bg-light">
-                <div className="row g-2">
+                <div className="row g-2 align-items-end">
                   <div className="col-6 col-md-2">
                     <div className="form-label small fw-semibold mb-1">Date</div>
                     <div>{formatAuDate(activeProductionDate)}</div>
@@ -331,9 +420,19 @@ export default function Traceability() {
                     <div className="form-label small fw-semibold mb-1">Product Name</div>
                     <div>{parseRecipeName(activeRecipe.name).productName}</div>
                   </div>
-                  <div className="col-6 col-md-1">
-                    <div className="form-label small fw-semibold mb-1">Hoyts BN</div>
-                    <div>{hoytsBatchNumber(activeProductionDate)}</div>
+                  <div className="col-12 col-md-3 col-xl-2">
+                    <div className="bn-warning">Please double check the batch number before saving</div>
+                    <label className="form-label small fw-semibold mb-1" htmlFor="tr_hoytsBn">
+                      Batch Number
+                    </label>
+                    <input
+                      id="tr_hoytsBn"
+                      className="form-control form-control-sm"
+                      autoComplete="off"
+                      inputMode="numeric"
+                      value={header.hoytsBn}
+                      onChange={(e) => setHeader((h) => ({ ...h, hoytsBn: e.target.value }))}
+                    />
                   </div>
                   {activeRecipe.packs?.length > 1 && (
                     <div className="col-6 col-md-2">
@@ -382,7 +481,38 @@ export default function Traceability() {
                   before this date.
                 </div>
               )}
-              <div className="table-responsive">
+              {/* Phones: one block per raw material so New batch is in reach. */}
+              <ul className="material-list d-md-none">
+                {results.map((r, idx) => (
+                  <li key={`${r.ingredientId}-${idx}`} className={!r.batch ? 'missing' : ''}>
+                    <div className="ml-info">
+                      <div className="fw-semibold">{r.ingredientName}</div>
+                      {r.batch ? (
+                        <>
+                          <div className="fw-medium">{displayBatchNumber(r.batch)}</div>
+                          <div className="text-muted small">
+                            {[r.batch.supplierName, r.batch.country].filter(Boolean).join(' · ') || '—'}
+                            {' · received '}
+                            {formatAuDate(r.batch.receivedDate)}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-warning fw-semibold small">
+                          <i className="bi bi-exclamation-triangle me-1"></i>No batch found
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      className="btn btn-sm btn-outline-primary text-nowrap"
+                      title={`Record a new batch of ${r.ingredientName}`}
+                      onClick={() => setNewBatchFor(r)}
+                    >
+                      <i className="bi bi-plus-lg me-1"></i>New batch
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <div className="table-responsive d-none d-md-block">
                 <table className="table table-hover mb-0">
                   <thead className="table-light">
                     <tr>
@@ -392,6 +522,7 @@ export default function Traceability() {
                       <th>Batch Number</th>
                       <th>Received Date</th>
                       <th>Record Created Date</th>
+                      <th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -413,6 +544,15 @@ export default function Traceability() {
                         <td className="text-muted small">
                           {r.batch?.createdAt ? formatAuDateTime(r.batch.createdAt) : <span className="text-muted">—</span>}
                         </td>
+                        <td className="text-end pe-3">
+                          <button
+                            className="btn btn-sm btn-outline-primary text-nowrap"
+                            title={`Record a new batch of ${r.ingredientName}`}
+                            onClick={() => setNewBatchFor(r)}
+                          >
+                            <i className="bi bi-plus-lg me-1"></i>New batch
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -432,6 +572,18 @@ export default function Traceability() {
             </div>
           )}
         </div>
+      )}
+
+      {newBatchFor && (
+        <NewBatchModal
+          ingredient={{ id: newBatchFor.ingredientId, name: newBatchFor.ingredientName }}
+          last={newBatchFor.batch}
+          defaultDate={activeProductionDate}
+          user={user}
+          flash={flash}
+          onClose={() => setNewBatchFor(null)}
+          onSaved={handleBatchSaved}
+        />
       )}
 
       {results === null && recipes.length === 0 && (

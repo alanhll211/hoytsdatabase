@@ -9,10 +9,12 @@ import {
 } from 'firebase/firestore'
 import { db } from '../firebase'
 import { useFlash } from '../FlashContext'
+import { useAuth } from '../AuthContext'
 import { formatAuDate } from '../utils/date'
 
 export default function Ingredients() {
   const { flash } = useFlash()
+  const { profile } = useAuth()
   const [ingredients, setIngredients] = useState([])
   const [batches, setBatches] = useState([])
   const [recipes, setRecipes] = useState([])
@@ -124,7 +126,7 @@ export default function Ingredients() {
 
   async function handleDeleteConfirm() {
     const ing = deleting
-    if (!ing) return
+    if (!ing || !profile.canDelete) return
     setBusy(true)
     try {
       const wb = writeBatch(db)
@@ -244,13 +246,15 @@ export default function Ingredients() {
                             >
                               <i className="bi bi-pencil"></i>
                             </button>
-                            <button
-                              className="btn btn-sm btn-outline-danger btn-icon"
-                              title="Delete"
-                              onClick={() => setDeleting(ing)}
-                            >
-                              <i className="bi bi-trash"></i>
-                            </button>
+                            {profile.canDelete && (
+                              <button
+                                className="btn btn-sm btn-outline-danger btn-icon"
+                                title="Delete"
+                                onClick={() => setDeleting(ing)}
+                              >
+                                <i className="bi bi-trash"></i>
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

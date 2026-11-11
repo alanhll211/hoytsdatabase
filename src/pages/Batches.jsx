@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore'
 import { db } from '../firebase'
 import { useFlash } from '../FlashContext'
+import { useAuth } from '../AuthContext'
 import DatePickInput from '../components/DatePickInput'
 import { parseAuDate, formatAuDate, formatAuDateTime } from '../utils/date'
 import { downloadCsv } from '../utils/csv'
@@ -30,6 +31,7 @@ const emptyAddForm = {
 
 export default function Batches() {
   const { flash } = useFlash()
+  const { user, profile } = useAuth()
   const [batches, setBatches] = useState([])
   const [ingredients, setIngredients] = useState([])
 
@@ -186,6 +188,7 @@ export default function Batches() {
         useCurrentDate: form.useCurrentDate,
         receivedDate: Timestamp.fromDate(receivedDate),
         createdAt: serverTimestamp(),
+        createdBy: user,
       })
       flash(`Batch ${batchNumber ?? 'Current Date'} added for ${ingredient.name}.`, 'success')
       if (addAnother) {
@@ -256,6 +259,7 @@ export default function Batches() {
   }
 
   async function handleDelete(batch) {
+    if (!profile.canDelete) return
     const label = batch.useCurrentDate ? 'Current Date' : batch.batchNumber
     if (!confirm(`Delete batch '${label}' for ${batch.ingredientName}?`)) return
     await deleteDoc(doc(db, 'batches', batch.id))
@@ -391,13 +395,15 @@ export default function Batches() {
                           >
                             <i className="bi bi-pencil"></i>
                           </button>
-                          <button
-                            className="btn btn-sm btn-outline-danger btn-icon"
-                            title="Delete"
-                            onClick={() => handleDelete(b)}
-                          >
-                            <i className="bi bi-trash"></i>
-                          </button>
+                          {profile.canDelete && (
+                            <button
+                              className="btn btn-sm btn-outline-danger btn-icon"
+                              title="Delete"
+                              onClick={() => handleDelete(b)}
+                            >
+                              <i className="bi bi-trash"></i>
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

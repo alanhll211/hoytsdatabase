@@ -40,7 +40,8 @@ export function buildExcelRows({ productionDate, recipeName, header, materials }
   const first = new Array(COLUMN_COUNT).fill('')
   first[COL.date] = formatAuDate(productionDate)
   first[COL.product] = parseRecipeName(recipeName).productName
-  first[COL.hoytsBn] = hoytsBatchNumber(productionDate)
+  // The batch number shown on screen, which may have been corrected by hand.
+  first[COL.hoytsBn] = header.hoytsBn ?? hoytsBatchNumber(productionDate)
   first[COL.size] = header.size
   first[COL.barcode] = header.barcode
   first[COL.phStart] = header.phStart

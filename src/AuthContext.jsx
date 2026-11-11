@@ -1,22 +1,28 @@
 import { createContext, useCallback, useContext, useState } from 'react'
+import { profileFor } from './permissions'
 
 const AuthContext = createContext(null)
 
 const STORAGE_KEY = 'hoyts-user'
-// The only username permitted to enter the system.
-const ALLOWED_USERNAME = 'alan'
+
+function storedUser() {
+  try {
+    return profileFor(sessionStorage.getItem(STORAGE_KEY))?.id || null
+  } catch {
+    return null
+  }
+}
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => sessionStorage.getItem(STORAGE_KEY) || null)
+  const [user, setUser] = useState(storedUser)
+  const profile = profileFor(user)
 
-  // Returns true if the username is accepted. Anything other than the allowed
-  // username is rejected.
+  // Returns true if the username belongs to a known user (any letter case).
   const login = useCallback((username) => {
-    if ((username || '').trim().toLowerCase() !== ALLOWED_USERNAME) {
-      return false
-    }
-    sessionStorage.setItem(STORAGE_KEY, ALLOWED_USERNAME)
-    setUser(ALLOWED_USERNAME)
+    const p = profileFor(username)
+    if (!p) return false
+    sessionStorage.setItem(STORAGE_KEY, p.id)
+    setUser(p.id)
     return true
   }, [])
 
@@ -26,7 +32,7 @@ export function AuthProvider({ children }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ user, login, logout }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, profile, login, logout }}>{children}</AuthContext.Provider>
   )
 }
 
