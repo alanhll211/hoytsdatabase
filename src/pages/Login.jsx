@@ -16,7 +16,7 @@ export default function Login() {
   const [username, setUsername] = useState('')
   const [error, setError] = useState('')
 
-  // Already signed in — send them where they were headed (or Home).
+  // Already signed in — send them where they were headed (or their home page).
   if (profile) {
     return <Navigate to={destination(profile, location.state?.from)} replace />
   }

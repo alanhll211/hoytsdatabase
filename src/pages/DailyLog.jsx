@@ -298,7 +298,6 @@ export default function DailyLog() {
                           id="dl_batch"
                           className="form-control"
                           autoComplete="off"
-                          inputMode="numeric"
                           required
                           value={editing.batchNumber}
                           onChange={(e) => setEditing((x) => ({ ...x, batchNumber: e.target.value }))}

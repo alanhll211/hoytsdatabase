@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, Outlet, Link, useLocation } from 'react-router-dom'
 import { useFlash } from './FlashContext'
 import { useAuth } from './AuthContext'
-import { siteForPath } from './permissions'
+import { menuFor, siteForPath } from './permissions'
 
 // Each site has its own pages; the switch in the nav moves between them.
 const SITES = [
@@ -80,7 +80,10 @@ export default function Layout() {
   // Sites this user can't open are left out entirely, switch included.
   const sites = SITES.filter((s) => profile.sites.includes(s.id))
   const site = sites.find((s) => s.id === siteForPath(location.pathname)) || sites[0]
-  const navItems = site.items
+  const navItems = menuFor(profile, site.items)
+  // The logo goes to the site's home, or this user's first page if that is
+  // hidden from them.
+  const brandTo = navItems.some((item) => item.to === site.home) ? site.home : navItems[0]?.to || site.home
   const [lastPath, setLastPath] = useState(location.pathname)
 
   // Close the mobile menu whenever the route changes (adjusting state during
@@ -107,7 +110,7 @@ export default function Layout() {
     <div className="app-shell">
       <header className={`gnav ${menuOpen ? 'is-open' : ''}`}>
         <div className="gnav-inner">
-          <Brand to={site.home} />
+          <Brand to={brandTo} />
           {sites.length > 1 && (
             <div className="d-none d-lg-flex">
               <SiteSwitch sites={sites} current={site} compact />

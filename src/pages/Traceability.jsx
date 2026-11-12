@@ -429,7 +429,6 @@ export default function Traceability() {
                       id="tr_hoytsBn"
                       className="form-control form-control-sm"
                       autoComplete="off"
-                      inputMode="numeric"
                       value={header.hoytsBn}
                       onChange={(e) => setHeader((h) => ({ ...h, hoytsBn: e.target.value }))}
                     />
