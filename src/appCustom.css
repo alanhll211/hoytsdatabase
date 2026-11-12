@@ -1034,15 +1034,6 @@ a:hover { text-decoration: underline; }
 .ffs-table td { vertical-align: top; }
 .ffs-table tr.line-cont > td.line-cell { border-bottom-color: transparent; }
 
-/* FFS "Copy a day" bar */
-.copy-day-summary { min-height: 2.4rem; display: flex; flex-direction: column; justify-content: flex-end; }
-.copy-day-summary .small {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
 /* Signed-in user, next to Sign out */
 .gnav-user { align-items: center; gap: 0.5rem; }
 .user-chip {

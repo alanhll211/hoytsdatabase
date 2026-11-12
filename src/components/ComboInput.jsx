@@ -8,6 +8,7 @@ import { Fragment, useEffect, useId, useRef, useState } from 'react'
 //
 // options: [{ value, hint?, group? }]
 // selectOnFocus: select the whole value on focus so typing replaces it.
+// inputMode: phone keyboard to raise, e.g. "decimal" for numbers.
 export default function ComboInput({
   id,
   value,
@@ -15,6 +16,7 @@ export default function ComboInput({
   onPick,
   options,
   placeholder,
+  inputMode,
   ariaLabel,
   required,
   selectOnFocus = false,
@@ -108,6 +110,7 @@ export default function ComboInput({
           aria-controls={listId}
           aria-autocomplete="list"
           autoComplete="off"
+          inputMode={inputMode}
           placeholder={placeholder}
           required={required}
           value={value}

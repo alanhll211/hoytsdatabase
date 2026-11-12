@@ -25,8 +25,6 @@ import {
   emptyLine,
   sortNewestFirst,
   sortEntryOrder,
-  entriesOnDay,
-  rowCount,
   lastEntryFor,
   lastEntryOnMachine,
   productOptions,
@@ -116,9 +114,6 @@ export default function FfsLog() {
   const [formKey, setFormKey] = useState(0)
   const [saving, setSaving] = useState(false)
   const [copiedKey, setCopiedKey] = useState(null)
-  // Date for "Copy a day". null follows the latest production day until a
-  // date is picked or typed.
-  const [copyDate, setCopyDate] = useState(null)
 
   useEffect(
     () =>
@@ -142,24 +137,6 @@ export default function FfsLog() {
     () => (editingId ? history.filter((e) => e.id !== editingId) : history),
     [history, editingId]
   )
-
-  // Every run on the picked day, whatever the list filters show.
-  const copyDay = copyDate ?? formatAuDate(history[0]?.date ?? new Date())
-  const copyDayEntries = useMemo(() => entriesOnDay(history, copyDay), [history, copyDay])
-  const copyDayKey = `pick:${copyDay}`
-  const copySummary = useMemo(() => {
-    if (!copyDayEntries?.length) return null
-    const runs = copyDayEntries.length
-    const rows = rowCount(copyDayEntries)
-    const machines = [...new Set(copyDayEntries.map((e) => e.machine))].sort((a, b) => a - b)
-    return {
-      date: formatAuDate(copyDayEntries[0].date),
-      runs: `${runs} run${runs !== 1 ? 's' : ''}`,
-      rows: `${rows} row${rows !== 1 ? 's' : ''}`,
-      machines: `Machine${machines.length !== 1 ? 's' : ''} ${machines.join(', ')}`,
-      products: [...new Set(copyDayEntries.map((e) => e.productName))].join(', '),
-    }
-  }, [copyDayEntries])
 
   const productName = form?.productName ?? ''
   const productOpts = useMemo(() => productOptions(past), [past])
@@ -381,8 +358,21 @@ export default function FfsLog() {
     return lines.map((l, i) => (
       <tr key={`${e.id}-${i}`} className={i < n - 1 ? 'line-cont' : ''}>
         {i === 0 && (
-          <td rowSpan={n} className="ps-4">
-            <span className="machine-badge">{e.machine}</span>
+          <td rowSpan={n} className="ps-3 ps-xl-4">
+            <div className="d-flex align-items-center gap-2">
+              {/* On narrow screens the actions column is off to the right, so
+                  editing starts from here. */}
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-secondary btn-icon ffs-edit-left d-xl-none"
+                title="Edit this entry"
+                aria-label={`Edit ${e.productName}`}
+                onClick={() => startForm(e.id, formFromEntry(e))}
+              >
+                <i className="bi bi-pencil"></i>
+              </button>
+              <span className="machine-badge">{e.machine}</span>
+            </div>
           </td>
         )}
         {i === 0 && (
@@ -457,48 +447,6 @@ export default function FfsLog() {
         <button className="btn btn-primary" onClick={() => startForm(null, blankForm(new Date()))}>
           <i className="bi bi-plus-lg me-1"></i>Add Entry
         </button>
-      </div>
-
-      {/* Copy every run of one day, all machines, for the FFS sheet */}
-      <div className="card mb-3">
-        <div className="card-body py-3">
-          <div className="row g-2 align-items-end">
-            <div className="col-md-3">
-              <label className="form-label" htmlFor="ffs_copy_date">
-                Copy a day for Excel
-              </label>
-              <DatePickInput id="ffs_copy_date" value={copyDay} onChange={setCopyDate} />
-            </div>
-            <div className="col-md-6 copy-day-summary" aria-live="polite">
-              {!loaded ? null : !copyDayEntries ? (
-                <span className="text-danger">Enter the date as DD/MM/YYYY.</span>
-              ) : !copySummary ? (
-                <span className="text-muted">No runs on {formatAuDate(parseAuDate(copyDay))}.</span>
-              ) : (
-                <>
-                  <div className="fw-medium">
-                    {copySummary.runs} · {copySummary.rows} · {copySummary.machines}
-                  </div>
-                  <div className="text-muted small" title={copySummary.products}>
-                    {copySummary.products}
-                  </div>
-                </>
-              )}
-            </div>
-            <div className="col-md-3 d-flex">
-              <button
-                className="btn btn-primary flex-fill"
-                disabled={!copySummary}
-                onClick={() =>
-                  copyEntries(copyDayEntries, copyDayKey, `(${copySummary.runs} on ${copySummary.date})`)
-                }
-              >
-                <i className={`bi ${copiedKey === copyDayKey ? 'bi-check-lg' : 'bi-clipboard'} me-1`}></i>
-                {copiedKey === copyDayKey ? 'Copied' : 'Copy All Products'}
-              </button>
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Filters */}
@@ -585,7 +533,7 @@ export default function FfsLog() {
                 <table className="table mb-0 ffs-table">
                   <thead className="table-light">
                     <tr>
-                      <th className="ps-4">Machine</th>
+                      <th className="ps-3 ps-xl-4">Machine</th>
                       <th>Product</th>
                       <th>Internal Ingredients</th>
                       <th>Hoyts Batch</th>
@@ -684,7 +632,8 @@ export default function FfsLog() {
                           value={form.hoytsBatch}
                           onChange={(e) => setForm((f) => ({ ...f, hoytsBatch: e.target.value, hoytsAuto: false }))}
                         />
-                        <div className="form-text">
+                        <div className="bn-warning mt-1 mb-0">Please double check the batch number is correct.</div>
+                        <div className="form-text mt-1">
                           {form.hoytsAuto ? (
                             "Julian code of the date (DDDYY)."
                           ) : (
@@ -707,6 +656,7 @@ export default function FfsLog() {
                           onChange={(v) => setField('weightPerBag', v)}
                           onPick={pickWeight}
                           options={weightOpts}
+                          inputMode="decimal"
                           placeholder="e.g. 25"
                           emptyText="No previous weights for this product"
                         />
@@ -756,7 +706,11 @@ export default function FfsLog() {
                               onPick={(o) => pickSupplier(i, o)}
                               options={supplierOpts}
                               placeholder="e.g. Best Ingredients"
-                              emptyText="No suppliers yet. Type a new one."
+                              emptyText={
+                                productName.trim()
+                                  ? 'No suppliers used for this product yet. Type one.'
+                                  : 'Enter the product name first to see its suppliers.'
+                              }
                             />
                           </div>
                           <div className="col-6 col-md-2">

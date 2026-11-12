@@ -1,4 +1,4 @@
-import { formatAuDate, parseAuDate } from './date'
+import { formatAuDate } from './date'
 import { withTextPrefix } from './batch'
 import { DATE_FORMAT, TEXT_FORMAT, htmlTable } from './excelHtml'
 
@@ -24,18 +24,6 @@ export function sortEntryOrder(entries) {
   return [...entries].sort((a, b) => createdMs(a) - createdMs(b))
 }
 
-// Every run on one production date (DD/MM/YYYY), in the order they were
-// entered. null when the date can't be read.
-export function entriesOnDay(entries, dateText) {
-  const d = parseAuDate(dateText)
-  if (!d) return null
-  const key = formatAuDate(d)
-  return sortEntryOrder(entries.filter((e) => formatAuDate(e.date) === key))
-}
-
-// Rows a list of runs takes in the sheet: one per raw material line.
-export const rowCount = (entries) => entries.reduce((n, e) => n + Math.max(e.lines?.length || 0, 1), 0)
-
 // The functions below take `history` sorted newest first, so the first match
 // is the last time something was used.
 
@@ -59,31 +47,23 @@ export function productOptions(history) {
   return [...byKey.values()].sort((a, b) => a.value.localeCompare(b.value))
 }
 
-// Suppliers used for this product come first, with the country and batch
-// that picking them fills in. Every other supplier follows.
+// Only the suppliers this product has used, most recent first, with the
+// country and batch that picking them fills in. A new product has none, so
+// its supplier is typed.
 export function supplierOptions(history, productName) {
   const product = norm(productName)
+  if (!product) return []
   const own = new Map()
-  const other = new Map()
   for (const e of history) {
-    const isOwn = product && norm(e.productName) === product
+    if (norm(e.productName) !== product) continue
     for (const l of e.lines || []) {
       const key = norm(l.supplier)
-      if (!key) continue
-      if (isOwn && !own.has(key)) {
+      if (key && !own.has(key)) {
         own.set(key, { value: l.supplier, hint: [l.country, l.batchNumber].filter(Boolean).join(' · ') })
-      } else if (!isOwn && !other.has(key)) {
-        other.set(key, { value: l.supplier, hint: l.country || '' })
       }
     }
   }
-  for (const key of own.keys()) other.delete(key)
-  const rest = [...other.values()].sort((a, b) => a.value.localeCompare(b.value))
-  if (own.size === 0) return rest
-  return [
-    ...[...own.values()].map((o) => ({ ...o, group: 'Used for this product' })),
-    ...rest.map((o) => ({ ...o, group: 'Other suppliers' })),
-  ]
+  return [...own.values()].map((o) => ({ ...o, group: 'Used for this product' }))
 }
 
 // Fields to fill when a supplier is picked: country and batch from the last
