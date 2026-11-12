@@ -14,6 +14,7 @@ export default function Login() {
   const navigate = useNavigate()
   const location = useLocation()
   const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
 
   // Already signed in — send them where they were headed (or their home page).
@@ -23,10 +24,10 @@ export default function Login() {
 
   function handleSubmit(e) {
     e.preventDefault()
-    if (login(username)) {
+    if (login(username, password)) {
       navigate(destination(profileFor(username), location.state?.from), { replace: true })
     } else {
-      setError('Access denied. Please check your username and try again.')
+      setError('Access denied. Please check your username and password.')
     }
   }
 
@@ -44,7 +45,7 @@ export default function Login() {
         </div>
 
         <h1 className="login-title">Sign in</h1>
-        <p className="login-sub">Enter your username to continue.</p>
+        <p className="login-sub">Enter your username and password to continue.</p>
 
         <form onSubmit={handleSubmit} autoComplete="off">
           <div className="mb-3">
@@ -66,6 +67,26 @@ export default function Login() {
               autoCapitalize="off"
               spellCheck="false"
               autoFocus
+            />
+          </div>
+          <div className="mb-3">
+            <label className="form-label fw-semibold" htmlFor="login-password">
+              Password
+            </label>
+            <input
+              id="login-password"
+              name="password"
+              type="password"
+              className="form-control"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value)
+                if (error) setError('')
+              }}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck="false"
             />
           </div>
 

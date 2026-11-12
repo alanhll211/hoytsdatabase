@@ -9,6 +9,7 @@ import { Fragment, useEffect, useId, useRef, useState } from 'react'
 // options: [{ value, hint?, group? }]
 // selectOnFocus: select the whole value on focus so typing replaces it.
 // inputMode: phone keyboard to raise, e.g. "decimal" for numbers.
+// small: compact size, to sit beside form-control-sm fields.
 export default function ComboInput({
   id,
   value,
@@ -17,6 +18,7 @@ export default function ComboInput({
   options,
   placeholder,
   inputMode,
+  small = false,
   ariaLabel,
   required,
   selectOnFocus = false,
@@ -66,7 +68,12 @@ export default function ComboInput({
     setFilter(text)
     setOpen(true)
     setActive(-1)
-    const exact = options.find((o) => o.value.toLowerCase() === text.trim().toLowerCase())
+    const typed = text.trim().toLowerCase()
+    // Moving on to a different value lets the last pick be picked again
+    // later; adding or removing letters on the same word doesn't.
+    const last = lastPicked.current?.toLowerCase()
+    if (last && !last.startsWith(typed) && !typed.startsWith(last)) lastPicked.current = null
+    const exact = options.find((o) => o.value.toLowerCase() === typed)
     if (exact && exact.value !== lastPicked.current) {
       lastPicked.current = exact.value
       onPick?.(exact)
@@ -98,7 +105,7 @@ export default function ComboInput({
 
   return (
     <div className="combo" ref={rootRef}>
-      <div className="input-group">
+      <div className={small ? 'input-group input-group-sm' : 'input-group'}>
         <input
           ref={inputRef}
           id={inputId}

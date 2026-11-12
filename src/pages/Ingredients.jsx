@@ -6,7 +6,7 @@ import {
   query,
   orderBy,
   writeBatch,
-} from 'firebase/firestore'
+} from '../data'
 import { db } from '../firebase'
 import { useFlash } from '../FlashContext'
 import { useAuth } from '../AuthContext'

@@ -1,25 +1,27 @@
 import { useEffect, useState } from 'react'
 import {
   collection,
+  doc,
   query,
   where,
   orderBy,
-  limit,
   getDocs,
   onSnapshot,
   addDoc,
+  updateDoc,
   serverTimestamp,
   Timestamp,
-} from 'firebase/firestore'
+} from '../data'
 import { db } from '../firebase'
 import { useFlash } from '../FlashContext'
 import { useAuth } from '../AuthContext'
 import { displayName } from '../permissions'
+import ComboInput from '../components/ComboInput'
 import DatePickInput from '../components/DatePickInput'
 import NewBatchModal from '../components/NewBatchModal'
-import { parseAuDate, formatAuDate, formatAuDateTime, formatDdmmyy } from '../utils/date'
+import { parseAuDate, formatAuDate, formatAuDateTime } from '../utils/date'
 import { downloadCsv } from '../utils/csv'
-import { withTextPrefix } from '../utils/batch'
+import { displayBatchNumber as batchNumberOn, lookupMaterials, materialsSnapshot, rememberPack } from '../utils/trace'
 import { copyHtmlTable, copyText } from '../utils/clipboard'
 import {
   PH_NOT_TESTED,
@@ -31,14 +33,13 @@ import {
   rowsToTsv,
 } from '../utils/excelRow'
 
-const ms = (t) => t?.toMillis?.() ?? 0
-
-function initialHeader(recipe, productionDate) {
-  const pack = recipe.packs?.[0]
+// prefill: batch number from the production date's Julian code (DDDYY), size
+// and barcode from the product's first saved pack. Without it (Kitchen) they
+// start empty and are typed or picked.
+function initialHeader(recipe, productionDate, prefill) {
+  const pack = prefill ? recipe.packs?.find((p) => p.size || p.barcode) : null
   return {
-    // Batch number defaults to the production date's Julian code (DDDYY).
-    hoytsBn: hoytsBatchNumber(productionDate),
-    packIndex: 0,
+    hoytsBn: prefill ? hoytsBatchNumber(productionDate) : '',
     size: pack?.size || '',
     barcode: pack?.barcode || '',
     phStart: recipe.phStart ?? PH_NOT_TESTED,
@@ -49,7 +50,7 @@ function initialHeader(recipe, productionDate) {
 
 export default function Traceability() {
   const { flash } = useFlash()
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const [recipes, setRecipes] = useState([])
   const [ingredients, setIngredients] = useState([])
 
@@ -83,55 +84,7 @@ export default function Traceability() {
     }
   }, [])
 
-  async function runTraceability(recipe, productionDate) {
-    const ingredientIds = recipe.ingredientIds || []
-    // Resolve each name from its ingredient id rather than the recipe's
-    // parallel ingredientNames array, which can be stored out of order and
-    // would otherwise mismatch the supplier/country/batch columns.
-    const nameById = new Map(ingredients.map((i) => [i.id, i.name]))
-    const ingredientNames = recipe.ingredientNames || []
-    const cutoff = Timestamp.fromDate(productionDate)
-
-    // Query each distinct ingredient only once, even if it appears more than
-    // once in the recipe, to avoid duplicate Firestore reads. A few recent
-    // batches are read so that, when two share a received date, the one
-    // entered last wins (e.g. a new bag recorded the same day).
-    const uniqueIds = [...new Set(ingredientIds)]
-    const batchByIngredient = new Map()
-    await Promise.all(
-      uniqueIds.map(async (ingredientId) => {
-        const snap = await getDocs(
-          query(
-            collection(db, 'batches'),
-            where('ingredientId', '==', ingredientId),
-            where('receivedDate', '<=', cutoff),
-            orderBy('receivedDate', 'desc'),
-            limit(10)
-          )
-        )
-        const latest = snap.docs
-          .map((d) => ({ id: d.id, ...d.data() }))
-          .sort(
-            (a, b) =>
-              ms(b.receivedDate) - ms(a.receivedDate) ||
-              (b.createdAt ? ms(b.createdAt) : Infinity) - (a.createdAt ? ms(a.createdAt) : Infinity)
-          )[0]
-        batchByIngredient.set(ingredientId, latest || null)
-      })
-    )
-
-    const items = ingredientIds.map((ingredientId, idx) => ({
-      ingredientId,
-      ingredientName:
-        nameById.get(ingredientId) ||
-        batchByIngredient.get(ingredientId)?.ingredientName ||
-        ingredientNames[idx] ||
-        '',
-      batch: batchByIngredient.get(ingredientId) || null,
-    }))
-    items.sort((a, b) => a.ingredientName.localeCompare(b.ingredientName))
-    return items
-  }
+  const runTraceability = (recipe, productionDate) => lookupMaterials(recipe, productionDate, ingredients)
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -156,7 +109,7 @@ export default function Traceability() {
       setResults(items)
       setActiveRecipe(recipe)
       setActiveProductionDate(productionDate)
-      setHeader(initialHeader(recipe, productionDate))
+      setHeader(initialHeader(recipe, productionDate, profile.prefill))
       setCopied(null)
       setPushedKey(null)
     } finally {
@@ -164,13 +117,30 @@ export default function Traceability() {
     }
   }
 
-  // "Current Date" batches have no fixed batch number — they resolve to the
-  // searched production date formatted as DDMMYY. All batch numbers carry a
-  // leading apostrophe so Excel keeps them as text.
-  function displayBatchNumber(batch) {
-    return withTextPrefix(
-      batch.useCurrentDate ? formatDdmmyy(activeProductionDate) : batch.batchNumber
-    )
+  const displayBatchNumber = (batch) => batchNumberOn(batch, activeProductionDate)
+
+  // The recipe as it is now, so sizes saved since the search show up.
+  const liveRecipe = (activeRecipe && recipes.find((r) => r.id === activeRecipe.id)) || activeRecipe
+  const sizeOptions = (liveRecipe?.packs || [])
+    .filter((p) => String(p.size ?? '').trim())
+    .map((p) => ({ value: p.size, hint: p.barcode || 'no barcode' }))
+
+  // Picking a saved size brings its barcode with it.
+  function pickSize(option) {
+    const pack = liveRecipe.packs.find((p) => p.size === option.value)
+    setHeader((h) => ({ ...h, size: option.value, barcode: pack?.barcode || '' }))
+  }
+
+  // Remember this size and barcode for the product (a known size takes the
+  // new barcode). Failing to save it never blocks the push or copy.
+  async function rememberSize() {
+    const packs = rememberPack(liveRecipe?.packs, header.size, header.barcode)
+    if (!packs) return
+    try {
+      await updateDoc(doc(db, 'recipes', liveRecipe.id), { packs })
+    } catch (err) {
+      console.error(err)
+    }
   }
 
   // Reload the raw materials after a new batch, keeping the edited grey row.
@@ -188,15 +158,12 @@ export default function Traceability() {
 
   const pushKey = activeRecipe && header ? `${activeRecipe.id}|${formatAuDate(activeProductionDate)}|${header.hoytsBn.trim()}` : ''
 
-  // Push records today's product to the Daily Log: date, product and batch
-  // number, plus who pushed it.
+  // Push records the product to the Daily Log: date, product, batch number,
+  // size and barcode, who pushed it, and the raw materials as shown now. Any
+  // of batch number, size and barcode may be left empty and filled in later.
   async function push() {
     if (pushing || !activeRecipe) return
     const batchNumber = header.hoytsBn.trim()
-    if (!batchNumber) {
-      flash('Enter the batch number before pushing.', 'danger')
-      return
-    }
     const productName = parseRecipeName(activeRecipe.name).productName
     const date = Timestamp.fromDate(activeProductionDate)
     setPushing(true)
@@ -207,7 +174,7 @@ export default function Traceability() {
         earlier &&
         !confirm(
           `${productName} was already pushed for ${formatAuDate(activeProductionDate)} ` +
-            `(batch ${earlier.batchNumber}, by ${displayName(earlier.pushedBy)}). Push it again?`
+            `(batch ${earlier.batchNumber || 'not entered'}, by ${displayName(earlier.pushedBy)}). Push it again?`
         )
       ) {
         return
@@ -218,22 +185,26 @@ export default function Traceability() {
         recipeName: activeRecipe.name,
         productName,
         batchNumber,
+        size: header.size.trim(),
+        barcode: normalizeBarcode(header.barcode),
+        materials: materialsSnapshot(results, activeProductionDate),
         pushedBy: user,
         createdAt: serverTimestamp(),
       })
       setPushedKey(pushKey)
-      flash(`Pushed ${productName} (batch ${batchNumber}) to the Daily Log.`, 'success')
+      flash(
+        batchNumber
+          ? `Pushed ${productName} (batch ${batchNumber}) to the Daily Log.`
+          : `Pushed ${productName} to the Daily Log without a batch number.`,
+        'success'
+      )
+      rememberSize()
     } catch (err) {
       console.error(err)
       flash('Could not push. Please try again.', 'danger')
     } finally {
       setPushing(false)
     }
-  }
-
-  function selectPack(index) {
-    const pack = activeRecipe.packs[index]
-    setHeader((h) => ({ ...h, packIndex: index, size: pack.size || '', barcode: pack.barcode || '' }))
   }
 
   // Ingredient / Supplier / Country / Batch Number for each raw material.
@@ -266,11 +237,9 @@ export default function Traceability() {
       header: { ...header, barcode: normalizeBarcode(header.barcode) },
       materials: materialRows(),
     })
-    reportCopy(
-      'all',
-      copyHtmlTable(rowsToHtml(rows), rowsToTsv(rows)),
-      `Copied ${rows.length} rows. Paste into column A in Excel.`
-    )
+    const ok = copyHtmlTable(rowsToHtml(rows), rowsToTsv(rows))
+    reportCopy('all', ok, `Copied ${rows.length} rows. Paste into column A in Excel.`)
+    if (ok) rememberSize()
   }
 
   // Copy only the raw material rows as tab-separated text, ready to paste
@@ -433,29 +402,34 @@ export default function Traceability() {
                       onChange={(e) => setHeader((h) => ({ ...h, hoytsBn: e.target.value }))}
                     />
                   </div>
-                  {activeRecipe.packs?.length > 1 && (
-                    <div className="col-6 col-md-2">
-                      <label className="form-label small fw-semibold mb-1" htmlFor="tr_pack">Pack</label>
-                      <select
-                        id="tr_pack"
-                        className="form-select form-select-sm"
-                        value={header.packIndex}
-                        onChange={(e) => selectPack(Number(e.target.value))}
-                      >
-                        {activeRecipe.packs.map((p, i) => (
-                          <option key={i} value={i}>{p.size || `Pack ${i + 1}`}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+                  <div className="col-6 col-md-2 col-xl-1">
+                    <label className="form-label small fw-semibold mb-1" htmlFor="tr_size">Size</label>
+                    <ComboInput
+                      id="tr_size"
+                      small
+                      value={header.size}
+                      onChange={(v) => setHeader((h) => ({ ...h, size: v }))}
+                      onPick={pickSize}
+                      options={sizeOptions}
+                      emptyText="No sizes saved for this product yet. Type one."
+                    />
+                  </div>
+                  <div className="col-6 col-md-2">
+                    <label className="form-label small fw-semibold mb-1 text-nowrap" htmlFor="tr_barcode">Label Barcode</label>
+                    <input
+                      id="tr_barcode"
+                      className="form-control form-control-sm"
+                      autoComplete="off"
+                      value={header.barcode}
+                      onChange={(e) => setHeader((h) => ({ ...h, barcode: e.target.value }))}
+                    />
+                  </div>
                   {[
-                    ['size', 'Size'],
-                    ['barcode', 'Label Barcode'],
                     ['phStart', 'pH Start'],
                     ['phEnd', 'pH End'],
                     ['document', 'Document'],
                   ].map(([key, label]) => (
-                    <div className="col-6 col-md-1" key={key}>
+                    <div className="col-4 col-md-1" key={key}>
                       <label className="form-label small fw-semibold mb-1 text-nowrap" htmlFor={`tr_${key}`}>{label}</label>
                       <input
                         id={`tr_${key}`}
@@ -466,12 +440,10 @@ export default function Traceability() {
                     </div>
                   ))}
                 </div>
-                {(!header.size || !header.barcode) && (
-                  <div className="text-warning small mt-2">
-                    <i className="bi bi-exclamation-triangle me-1"></i>
-                    Size or barcode is empty. Save them on the Recipes page to fill them in next time.
-                  </div>
-                )}
+                <div className="form-text mt-2">
+                  Sizes and barcodes are remembered for this product when you push or copy. Pick a size to fill in its
+                  barcode.
+                </div>
               </div>
               {missingCount > 0 && (
                 <div className="alert alert-warning rounded-0 border-0 border-bottom border-warning mb-0 py-2 px-4">

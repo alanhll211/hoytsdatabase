@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { addDoc, collection, serverTimestamp, Timestamp } from 'firebase/firestore'
+import { addDoc, collection, serverTimestamp, Timestamp } from '../data'
 import { db } from '../firebase'
 import DatePickInput from './DatePickInput'
 import { formatAuDate, parseAuDate } from '../utils/date'

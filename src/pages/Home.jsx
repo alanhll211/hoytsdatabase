@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { collection, onSnapshot } from 'firebase/firestore'
+import { collection, onSnapshot } from '../data'
 import { db } from '../firebase'
 import { formatAuDate } from '../utils/date'
 import { withTextPrefix } from '../utils/batch'
