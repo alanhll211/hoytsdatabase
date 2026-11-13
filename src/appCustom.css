@@ -1112,3 +1112,9 @@ a:hover { text-decoration: underline; }
 .dl-materials > :not(caption) > * > * { background: transparent; }
 .dl-materials thead th { font-weight: 600; color: var(--ink-2, #3a3a3c); }
 .dl-detail .material-list { margin: 0; }
+/* On phones the product table can be wider than the screen (it scrolls
+   sideways); keep the open panel to the visible width so its buttons, note
+   and raw materials are never cut off. */
+@media (max-width: 767.98px) {
+  .dl-detail-body { position: sticky; left: 0; width: calc(100vw - 2rem); }
+}

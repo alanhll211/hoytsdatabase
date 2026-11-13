@@ -18,11 +18,22 @@ import { useAuth } from '../AuthContext'
 import { displayName } from '../permissions'
 import DatePickInput from '../components/DatePickInput'
 import { formatAuDate, formatAuDateTime, parseAuDate } from '../utils/date'
-import { lookupMaterials, materialsSnapshot } from '../utils/trace'
+import { lookupMaterials, materialCopyRows, materialsSnapshot } from '../utils/trace'
+import { copyHtmlTable, copyText } from '../utils/clipboard'
+import {
+  PH_NOT_TESTED,
+  buildExcelRows,
+  materialsTsv,
+  normalizeBarcode,
+  parseRecipeName,
+  rowsToHtml,
+  rowsToTsv,
+} from '../utils/excelRow'
 
 // Products pushed from Traceability, grouped by production day. Each push
-// opens to show its raw materials as they were when it was pushed. Kitchen
-// and ALAN can correct an entry; only ALAN can delete one.
+// opens to show its raw materials as they were when it was pushed, with the
+// same Copy All / Copy Materials as Traceability. Kitchen and ALAN can
+// correct an entry; only ALAN can delete one.
 
 const COLLECTION = 'dailyProduction'
 const DAYS_PER_PAGE = 10
@@ -115,6 +126,10 @@ export default function DailyLog() {
   // { id, date, productName, batchNumber, size, barcode } while editing.
   const [editing, setEditing] = useState(null)
   const [saving, setSaving] = useState(false)
+  // Recipes by id, for the pH of pushes saved before pH was stored with them.
+  const [recipes, setRecipes] = useState(null)
+  // Which copy button just succeeded, as "<push id>:all" or "<push id>:materials".
+  const [copied, setCopied] = useState(null)
 
   useEffect(
     () =>
@@ -127,6 +142,19 @@ export default function DailyLog() {
         (err) => {
           console.error(err)
           setLoaded(true)
+        }
+      ),
+    []
+  )
+
+  useEffect(
+    () =>
+      onSnapshot(
+        collection(db, 'recipes'),
+        (snap) => setRecipes(new Map(snap.docs.map((d) => [d.id, d.data()]))),
+        (err) => {
+          console.error(err)
+          setRecipes(new Map())
         }
       ),
     []
@@ -186,21 +214,97 @@ export default function DailyLog() {
     if (opening && !e.materials && !lookedUp[e.id]?.materials) lookUp(e)
   }
 
-  function renderDetail(e) {
-    if (e.materials) return <Materials materials={e.materials} />
-    const found = lookedUp[e.id]
-    if (!found || found.loading) return <div className="text-muted small px-4 py-3">Loading raw materials…</div>
-    if (found.error) {
-      return <div className="text-danger small px-4 py-3">Could not load the raw materials for this product.</div>
+  // The grey product row's values as pushed. Older pushes didn't save pH or
+  // Document, so those come from the recipe instead.
+  function excelHeader(e) {
+    const recipe = recipes?.get(e.recipeId)
+    return {
+      hoytsBn: e.batchNumber || '',
+      size: e.size || '',
+      barcode: normalizeBarcode(e.barcode),
+      phStart: e.phStart ?? recipe?.phStart ?? PH_NOT_TESTED,
+      phEnd: e.phEnd ?? recipe?.phEnd ?? PH_NOT_TESTED,
+      document: e.document ?? parseRecipeName(e.recipeName).document,
     }
+  }
+
+  function reportCopy(key, ok, message) {
+    if (ok) {
+      setCopied(key)
+      flash(message, 'success')
+      setTimeout(() => setCopied((c) => (c === key ? null : c)), 2000)
+    } else {
+      flash('Copy failed. Your browser blocked clipboard access.', 'danger')
+    }
+  }
+
+  // Same rows as Copy All on Traceability: the product row plus one row per
+  // raw material across columns A-P. Runs synchronously in the click.
+  function copyAll(e, materials) {
+    const rows = buildExcelRows({
+      productionDate: e.date.toDate(),
+      productName: e.productName || '',
+      header: excelHeader(e),
+      materials: materialCopyRows(materials),
+    })
+    const ok = copyHtmlTable(rowsToHtml(rows), rowsToTsv(rows))
+    reportCopy(`${e.id}:all`, ok, `Copied ${rows.length} rows. Paste into column A in Excel.`)
+  }
+
+  async function copyMaterials(e, materials) {
+    const rows = materialCopyRows(materials)
+    reportCopy(
+      `${e.id}:materials`,
+      await copyText(materialsTsv(rows)),
+      `Copied ${rows.length} row${rows.length !== 1 ? 's' : ''}. Paste into column D in Excel.`
+    )
+  }
+
+  function renderDetail(e) {
+    const found = lookedUp[e.id]
+    const materials = e.materials || found?.materials
+    if (!materials) {
+      if (found?.error) {
+        return <div className="text-danger small px-4 py-3">Could not load the raw materials for this product.</div>
+      }
+      return <div className="text-muted small px-4 py-3">Loading raw materials…</div>
+    }
+    // Copy All waits for the recipes only when it needs their pH.
+    const canCopy = materials.length > 0 && (e.phStart !== undefined || recipes !== null)
+    const copiedAll = copied === `${e.id}:all`
+    const copiedMaterials = copied === `${e.id}:materials`
     return (
       <>
-        <div className="text-muted small px-4 pt-2 pb-1">
-          <i className="bi bi-info-circle me-1"></i>
-          Pushed before raw materials were saved with each push, so these are looked up from the current batch
-          records.
+        <div className="d-flex flex-wrap gap-2 px-4 pt-3 pb-2">
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            onClick={() => copyAll(e, materials)}
+            disabled={!canCopy}
+            title="Copy the product row and raw materials. Paste into column A in Excel."
+          >
+            <i className={`bi ${copiedAll ? 'bi-check-lg' : 'bi-clipboard'} me-1`}></i>
+            {copiedAll ? 'Copied' : 'Copy All'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-primary"
+            onClick={() => copyMaterials(e, materials)}
+            disabled={materials.length === 0}
+            title="Copy Ingredient, Supplier Name, Country and Batch Number. Paste into column D in Excel."
+          >
+            <i className={`bi ${copiedMaterials ? 'bi-check-lg' : 'bi-clipboard'} me-1`}></i>
+            {copiedMaterials ? 'Copied' : 'Copy Materials'}
+          </button>
         </div>
-        <Materials materials={found.materials} />
+        {!e.materials && (
+          <div className="text-muted small px-4 pb-1">
+            <i className="bi bi-info-circle me-1"></i>
+            Pushed before raw materials were saved with each push, so these are looked up from the current batch
+            records.
+          </div>
+        )}
+        <Materials materials={materials} />
       </>
     )
   }
@@ -273,7 +377,7 @@ export default function DailyLog() {
       <div className="page-header">
         <div>
           <h1>Daily Production Log</h1>
-          <p className="page-sub">Products pushed from Traceability, by day. Tap a product to see its raw materials.</p>
+          <p className="page-sub">Products pushed from Traceability, by day. Tap a product to see and copy its raw materials.</p>
         </div>
       </div>
 
@@ -398,7 +502,7 @@ export default function DailyLog() {
                           {open && (
                             <tr className="dl-detail" id={`dl-detail-${e.id}`}>
                               <td colSpan={4} className="p-0">
-                                {renderDetail(e)}
+                                <div className="dl-detail-body">{renderDetail(e)}</div>
                               </td>
                             </tr>
                           )}

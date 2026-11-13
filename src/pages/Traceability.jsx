@@ -21,12 +21,19 @@ import DatePickInput from '../components/DatePickInput'
 import NewBatchModal from '../components/NewBatchModal'
 import { parseAuDate, formatAuDate, formatAuDateTime } from '../utils/date'
 import { downloadCsv } from '../utils/csv'
-import { displayBatchNumber as batchNumberOn, lookupMaterials, materialsSnapshot, rememberPack } from '../utils/trace'
+import {
+  displayBatchNumber as batchNumberOn,
+  lookupMaterials,
+  materialCopyRows,
+  materialsSnapshot,
+  rememberPack,
+} from '../utils/trace'
 import { copyHtmlTable, copyText } from '../utils/clipboard'
 import {
   PH_NOT_TESTED,
   buildExcelRows,
   hoytsBatchNumber,
+  materialsTsv,
   normalizeBarcode,
   parseRecipeName,
   rowsToHtml,
@@ -159,7 +166,8 @@ export default function Traceability() {
   const pushKey = activeRecipe && header ? `${activeRecipe.id}|${formatAuDate(activeProductionDate)}|${header.hoytsBn.trim()}` : ''
 
   // Push records the product to the Daily Log: date, product, batch number,
-  // size and barcode, who pushed it, and the raw materials as shown now. Any
+  // size, barcode, pH and document, who pushed it, and the raw materials as
+  // shown now. Any
   // of batch number, size and barcode may be left empty and filled in later.
   async function push() {
     if (pushing || !activeRecipe) return
@@ -187,6 +195,10 @@ export default function Traceability() {
         batchNumber,
         size: header.size.trim(),
         barcode: normalizeBarcode(header.barcode),
+        // Kept so the Daily Log can copy the same Excel rows later.
+        phStart: header.phStart,
+        phEnd: header.phEnd,
+        document: header.document.trim(),
         materials: materialsSnapshot(results, activeProductionDate),
         pushedBy: user,
         createdAt: serverTimestamp(),
@@ -207,15 +219,9 @@ export default function Traceability() {
     }
   }
 
-  // Ingredient / Supplier / Country / Batch Number for each raw material.
-  function materialRows() {
-    return results.map((r) => [
-      r.ingredientName,
-      r.batch?.supplierName || '',
-      r.batch?.country || '',
-      r.batch ? displayBatchNumber(r.batch) : 'NO BATCH FOUND',
-    ])
-  }
+  // Ingredient / Supplier / Country / Batch Number for each raw material,
+  // built the same way as the Daily Log's copy so both paste identically.
+  const materialRows = () => materialCopyRows(materialsSnapshot(results, activeProductionDate))
 
   function reportCopy(which, ok, message) {
     if (ok) {
@@ -246,13 +252,11 @@ export default function Traceability() {
   // into column D (no header row, no date columns).
   async function copyMaterials() {
     if (!results) return
-    const lines = materialRows().map((row) =>
-      row.map((v) => String(v).replace(/[\t\r\n]+/g, ' ')).join('\t')
-    )
+    const rows = materialRows()
     reportCopy(
       'materials',
-      await copyText(lines.join('\r\n')),
-      `Copied ${lines.length} row${lines.length !== 1 ? 's' : ''}. Paste into column D in Excel.`
+      await copyText(materialsTsv(rows)),
+      `Copied ${rows.length} row${rows.length !== 1 ? 's' : ''}. Paste into column D in Excel.`
     )
   }
 

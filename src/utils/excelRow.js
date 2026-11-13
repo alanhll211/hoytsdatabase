@@ -36,10 +36,12 @@ export function normalizeBarcode(value) {
   return String(value ?? '').trim().slice(-6)
 }
 
-export function buildExcelRows({ productionDate, recipeName, header, materials }) {
+// productName (optional) overrides the name taken from recipeName, e.g. one
+// corrected in the Daily Log.
+export function buildExcelRows({ productionDate, recipeName, productName, header, materials }) {
   const first = new Array(COLUMN_COUNT).fill('')
   first[COL.date] = formatAuDate(productionDate)
-  first[COL.product] = parseRecipeName(recipeName).productName
+  first[COL.product] = productName ?? parseRecipeName(recipeName).productName
   // The batch number shown on screen, which may have been corrected by hand.
   first[COL.hoytsBn] = header.hoytsBn ?? hoytsBatchNumber(productionDate)
   first[COL.size] = header.size
@@ -69,6 +71,12 @@ export function rowsToTsv(rows) {
         .join('\t')
     )
     .join('\r\n')
+}
+
+// Raw material rows alone as tab-separated text, for pasting at column D
+// (no product row, no date columns).
+export function materialsTsv(rows) {
+  return rows.map((row) => row.map((v) => String(v ?? '').replace(/[\t\r\n]+/g, ' ')).join('\t')).join('\r\n')
 }
 
 // Blank cells get no format, so values typed in later (pH, pallet...) aren't

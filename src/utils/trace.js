@@ -79,6 +79,18 @@ export function materialsSnapshot(items, productionDate) {
   }))
 }
 
+// The columns pasted at column D of the sheet for each raw material:
+// Ingredient, Supplier Name, Country, Batch Number. materials: as made by
+// materialsSnapshot.
+export function materialCopyRows(materials) {
+  return materials.map((m) => [
+    m.ingredientName,
+    m.supplierName,
+    m.country,
+    m.found ? m.batchNumber : 'NO BATCH FOUND',
+  ])
+}
+
 const sizeKey = (s) => String(s ?? '').trim().toLowerCase()
 
 // A product's remembered sizes after using this size and barcode: a new size
