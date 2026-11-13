@@ -8,7 +8,8 @@
 // home (optional): where they land after signing in.
 // prefill: Traceability fills in the batch number, size and barcode.
 // demo: works on a private, temporary database (see data.js) instead of the
-// shared one; nothing they enter reaches anyone else.
+// shared one; nothing they enter reaches anyone else. Nothing on screen says
+// so: the account looks like any other.
 export const USERS = {
   alan: {
     id: 'alan',
@@ -39,14 +40,17 @@ export const USERS = {
     isAdmin: false,
     prefill: false,
   },
+  // Same pages and behaviour as kitchen, on an empty private database.
   qa: {
     id: 'qa',
     name: 'QA',
     password: 'qa',
-    sites: ['main', 'ffs'],
-    canDelete: true,
-    isAdmin: true,
-    prefill: true,
+    sites: ['main'],
+    pages: ['/batches', '/daily', '/traceability'],
+    home: '/batches',
+    canDelete: false,
+    isAdmin: false,
+    prefill: false,
     demo: true,
   },
 }

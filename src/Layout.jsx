@@ -187,15 +187,6 @@ export default function Layout() {
       </header>
 
       <main className="app-content">
-        {profile.demo && (
-          <div className="demo-banner" role="note">
-            <i className="bi bi-easel"></i>
-            <span>
-              <strong>Demo account.</strong> What you enter here is only on this device and is cleared when you
-              close the app.
-            </span>
-          </div>
-        )}
         <Outlet />
       </main>
 

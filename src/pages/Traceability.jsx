@@ -15,7 +15,7 @@ import {
 import { db } from '../firebase'
 import { useFlash } from '../FlashContext'
 import { useAuth } from '../AuthContext'
-import { displayName } from '../permissions'
+import { canOpen, displayName } from '../permissions'
 import ComboInput from '../components/ComboInput'
 import DatePickInput from '../components/DatePickInput'
 import NewBatchModal from '../components/NewBatchModal'
@@ -560,11 +560,17 @@ export default function Traceability() {
       {results === null && recipes.length === 0 && (
         <div className="alert alert-info">
           <i className="bi bi-info-circle me-1"></i>
-          No recipes found.{' '}
-          <a href="/recipes" className="alert-link">
-            Create a recipe
-          </a>{' '}
-          to get started.
+          No recipes found.
+          {/* Users without the Recipes page (kitchen) can't follow the link. */}
+          {canOpen(profile, '/recipes') && (
+            <>
+              {' '}
+              <a href="/recipes" className="alert-link">
+                Create a recipe
+              </a>{' '}
+              to get started.
+            </>
+          )}
         </div>
       )}
     </>

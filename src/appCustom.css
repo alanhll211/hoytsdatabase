@@ -1090,21 +1090,6 @@ a:hover { text-decoration: underline; }
 .material-list li.missing { background: #fff8e6; }
 .material-list .ml-info { min-width: 0; overflow-wrap: anywhere; }
 
-/* qa demo account notice */
-.demo-banner {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  background: #fff8e6;
-  color: #7a5200;
-  border: 1px solid #f3dca4;
-  border-radius: 12px;
-  padding: 0.6rem 0.9rem;
-  margin-bottom: 1.25rem;
-  font-size: 0.88rem;
-}
-.demo-banner .bi { margin-top: 0.1rem; }
-
 /* Daily Log: a product row opens to show its raw materials */
 .dl-toggle {
   display: flex;
