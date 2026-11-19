@@ -6,6 +6,9 @@ import 'flatpickr/dist/flatpickr.min.css'
 import 'bootstrap/dist/js/bootstrap.bundle.min.js'
 import './index.css'
 import App from './App.jsx'
+import { installKeyboardViewport } from './utils/keyboardViewport'
+
+installKeyboardViewport()
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

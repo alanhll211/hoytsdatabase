@@ -17,6 +17,7 @@ import { useAuth } from '../AuthContext'
 import { displayName } from '../permissions'
 import DatePickInput from '../components/DatePickInput'
 import ComboInput from '../components/ComboInput'
+import { selectAllOnFocus } from '../utils/selectOnFocus'
 import { parseAuDate, formatAuDate } from '../utils/date'
 import { hoytsBatchNumber } from '../utils/excelRow'
 import { copyHtmlTable } from '../utils/clipboard'
@@ -114,6 +115,9 @@ export default function FfsLog() {
   const [formKey, setFormKey] = useState(0)
   const [saving, setSaving] = useState(false)
   const [copiedKey, setCopiedKey] = useState(null)
+  // Lines whose Internal Ingredient field has been opened. It's rarely used,
+  // so it stays behind a button unless opened or already filled in.
+  const [internalOpen, setInternalOpen] = useState(() => new Set())
 
   useEffect(
     () =>
@@ -182,6 +186,7 @@ export default function FfsLog() {
     setEditingId(id)
     setForm(value)
     setFormKey((k) => k + 1)
+    setInternalOpen(new Set())
   }
 
   function closeForm() {
@@ -200,6 +205,17 @@ export default function FfsLog() {
       machineFill: null,
     }))
   const setLines = (fn) => setForm((f) => ({ ...f, lines: fn(f.lines), machineFill: null }))
+
+  const keepInternalOpen = (i) => setInternalOpen((s) => (s.has(i) ? s : new Set(s).add(i)))
+  function openInternal(i) {
+    keepInternalOpen(i)
+    setTimeout(() => document.getElementById(`ffs_internal_${i}`)?.focus(), 0)
+  }
+  function removeLine(i) {
+    setLines((lines) => lines.filter((_, x) => x !== i))
+    // Later lines move up one place.
+    setInternalOpen((s) => new Set([...s].filter((x) => x !== i).map((x) => (x > i ? x - 1 : x))))
+  }
 
   // Tapping a machine fills in its last run, as long as no product has been
   // typed or picked yet. Another machine tap swaps in that machine's last run.
@@ -563,7 +579,8 @@ export default function FfsLog() {
           <div className="modal fade show" style={{ display: 'block' }} tabIndex="-1">
             <div className="modal-dialog modal-wide">
               <div className="modal-content allow-overflow">
-                <form key={formKey} onSubmit={handleSubmit}>
+                {/* Tapping any field selects what's in it, so typing replaces it. */}
+                <form key={formKey} onSubmit={handleSubmit} onFocus={selectAllOnFocus}>
                   <div className="modal-header">
                     <h5 className="modal-title">{editingId ? 'Edit Entry' : 'Add Entry'}</h5>
                     <button type="button" className="btn-close" aria-label="Close" onClick={closeForm}></button>
@@ -612,7 +629,6 @@ export default function FfsLog() {
                           onChange={(v) => setField('productName', v)}
                           onPick={pickProduct}
                           options={productOpts}
-                          selectOnFocus={!!form.machineFill}
                           placeholder="e.g. Cumin Ground"
                           required
                           emptyText="No products yet. Type a new one."
@@ -678,80 +694,101 @@ export default function FfsLog() {
                     </div>
 
                     <div className="section-title mt-4 mb-2">Raw Materials</div>
-                    {form.lines.map((line, i) => (
-                      <div className="ffs-line" key={i}>
-                        <div className="row g-2">
-                          <div className="col-6 col-md-3">
-                            <label className="form-label small" htmlFor={`ffs_internal_${i}`}>
-                              Internal Ingredient
-                            </label>
-                            <ComboInput
-                              id={`ffs_internal_${i}`}
-                              value={line.internalIngredient}
-                              onChange={(v) => setLine(i, { internalIngredient: v })}
-                              onPick={(o) => pickInternal(i, o)}
-                              options={internalOpts}
-                              placeholder="Optional"
-                              emptyText="None recorded for this product"
-                            />
-                          </div>
-                          <div className="col-6 col-md-3">
-                            <label className="form-label small" htmlFor={`ffs_supplier_${i}`}>
-                              Supplier
-                            </label>
-                            <ComboInput
-                              id={`ffs_supplier_${i}`}
-                              value={line.supplier}
-                              onChange={(v) => setLine(i, { supplier: v })}
-                              onPick={(o) => pickSupplier(i, o)}
-                              options={supplierOpts}
-                              placeholder="e.g. Best Ingredients"
-                              emptyText={
-                                productName.trim()
-                                  ? 'No suppliers used for this product yet. Type one.'
-                                  : 'Enter the product name first to see its suppliers.'
-                              }
-                            />
-                          </div>
-                          <div className="col-6 col-md-2">
-                            <label className="form-label small" htmlFor={`ffs_country_${i}`}>
-                              Country
-                            </label>
-                            <input
-                              id={`ffs_country_${i}`}
-                              className="form-control"
-                              autoComplete="off"
-                              value={line.country}
-                              onChange={(e) => setLine(i, { country: e.target.value })}
-                            />
-                          </div>
-                          <div className={form.lines.length > 1 ? 'col-5 col-md-3' : 'col-6 col-md-4'}>
-                            <label className="form-label small" htmlFor={`ffs_batch_${i}`}>
-                              Batch / Lot No.
-                            </label>
-                            <input
-                              id={`ffs_batch_${i}`}
-                              className="form-control"
-                              autoComplete="off"
-                              value={line.batchNumber}
-                              onChange={(e) => setLine(i, { batchNumber: e.target.value })}
-                            />
-                          </div>
-                          {form.lines.length > 1 && (
-                            <div className="col-1 d-flex align-items-end justify-content-end">
-                              <button
-                                type="button"
-                                className="btn btn-outline-danger btn-icon"
-                                title="Remove line"
-                                onClick={() => setLines((lines) => lines.filter((_, x) => x !== i))}
-                              >
-                                <i className="bi bi-trash"></i>
-                              </button>
+                    {form.lines.map((line, i) => {
+                      const multi = form.lines.length > 1
+                      const showInternal = internalOpen.has(i) || !!str(line.internalIngredient)
+                      return (
+                        <div className="ffs-line" key={i}>
+                          {/* Phones: Supplier and Country share a row, Batch gets a full row. */}
+                          <div className="row g-2">
+                            <div className="col-7 col-md-4">
+                              <label className="form-label small" htmlFor={`ffs_supplier_${i}`}>
+                                Supplier
+                              </label>
+                              <ComboInput
+                                id={`ffs_supplier_${i}`}
+                                value={line.supplier}
+                                onChange={(v) => setLine(i, { supplier: v })}
+                                onPick={(o) => pickSupplier(i, o)}
+                                options={supplierOpts}
+                                placeholder="e.g. Best Ingredients"
+                                emptyText={
+                                  productName.trim()
+                                    ? 'No suppliers used for this product yet. Type one.'
+                                    : 'Enter the product name first to see its suppliers.'
+                                }
+                              />
                             </div>
-                          )}
+                            <div className="col-5 col-md-3">
+                              <label className="form-label small" htmlFor={`ffs_country_${i}`}>
+                                Country
+                              </label>
+                              <input
+                                id={`ffs_country_${i}`}
+                                className="form-control"
+                                autoComplete="off"
+                                value={line.country}
+                                onChange={(e) => setLine(i, { country: e.target.value })}
+                              />
+                            </div>
+                            <div className={multi ? 'col-10 col-md-4' : 'col-12 col-md-5'}>
+                              <label className="form-label small" htmlFor={`ffs_batch_${i}`}>
+                                Batch / Lot No.
+                              </label>
+                              <input
+                                id={`ffs_batch_${i}`}
+                                className="form-control"
+                                autoComplete="off"
+                                value={line.batchNumber}
+                                onChange={(e) => setLine(i, { batchNumber: e.target.value })}
+                              />
+                            </div>
+                            {multi && (
+                              <div className="col-2 col-md-1 d-flex align-items-end justify-content-end">
+                                <button
+                                  type="button"
+                                  className="btn btn-outline-danger btn-icon"
+                                  title="Remove line"
+                                  onClick={() => removeLine(i)}
+                                >
+                                  <i className="bi bi-trash"></i>
+                                </button>
+                              </div>
+                            )}
+                            {showInternal ? (
+                              <div className="col-12 col-md-6">
+                                <label className="form-label small" htmlFor={`ffs_internal_${i}`}>
+                                  Internal Ingredient
+                                </label>
+                                <ComboInput
+                                  id={`ffs_internal_${i}`}
+                                  value={line.internalIngredient}
+                                  onChange={(v) => {
+                                    setLine(i, { internalIngredient: v })
+                                    // Stays open while it's being cleared.
+                                    keepInternalOpen(i)
+                                  }}
+                                  onPick={(o) => pickInternal(i, o)}
+                                  options={internalOpts}
+                                  placeholder="Optional"
+                                  emptyText="None recorded for this product"
+                                />
+                              </div>
+                            ) : (
+                              <div className="col-12">
+                                <button
+                                  type="button"
+                                  className="btn btn-link btn-sm p-0 ffs-internal-toggle"
+                                  onClick={() => openInternal(i)}
+                                >
+                                  <i className="bi bi-plus-lg me-1"></i>Internal ingredient
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                     <button
                       type="button"
                       className="btn btn-sm btn-outline-secondary"

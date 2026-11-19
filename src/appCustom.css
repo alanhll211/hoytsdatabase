@@ -732,8 +732,20 @@ a:hover { text-decoration: underline; }
 /* ============================================================
    Modals
    ============================================================ */
-.modal { overflow-y: auto; }
+/* A swipe that reaches the end of the dialog stops there instead of moving
+   the page behind it. */
+.modal { overflow-y: auto; overscroll-behavior: contain; }
 .modal-dialog { max-width: 520px; }
+/* Phones: the page behind an open dialog doesn't scroll, so every swipe
+   scrolls the dialog. */
+@media (pointer: coarse) {
+  html:has(.modal.show),
+  html:has(.modal.show) body { overflow: hidden; }
+}
+/* While the on-screen keyboard is up, the dialog fills only the visible area
+   above it, with room to scroll its last fields up (utils/keyboardViewport.js). */
+html.kb-open .modal { top: var(--vv-top, 0px); height: var(--vv-height, 100%); }
+html.kb-open .modal-dialog { margin-bottom: calc(var(--vv-height, 50vh) * 0.5); }
 .modal-content {
   border: 0;
   border-radius: var(--radius-lg);
@@ -1021,6 +1033,9 @@ a:hover { text-decoration: underline; }
   border: 1px solid var(--hairline-soft);
   border-radius: var(--radius-sm);
 }
+/* Opens the rarely used Internal Ingredient field. */
+.ffs-internal-toggle { font-size: 0.85rem; text-decoration: none; }
+.ffs-internal-toggle:hover { text-decoration: underline; }
 .machine-badge {
   display: inline-flex;
   align-items: center;

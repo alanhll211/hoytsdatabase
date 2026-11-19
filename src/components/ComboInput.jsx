@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react'
+import { selectAllOnFocus } from '../utils/selectOnFocus'
 
 // Free-text input with a dropdown of previous values. Picking an option (by
 // click, Enter, or typing it exactly) calls onPick so the caller can fill in
@@ -123,17 +124,7 @@ export default function ComboInput({
           value={value}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          onFocus={(e) => {
-            if (!selectOnFocus) return
-            const el = e.target
-            const text = el.value
-            el.select()
-            // A tap can move the caret after focus; select again unless
-            // typing has already started.
-            setTimeout(() => {
-              if (el.value === text) el.setSelectionRange(0, text.length)
-            }, 0)
-          }}
+          onFocus={selectOnFocus ? selectAllOnFocus : undefined}
           onBlur={(e) => {
             if (!rootRef.current?.contains(e.relatedTarget)) setOpen(false)
           }}
