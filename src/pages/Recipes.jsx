@@ -23,10 +23,11 @@ const emptyProduct = () => ({
 })
 
 // Fields saved on the recipe. Rows with neither size nor barcode are dropped.
+// Jar and lid details remembered from Traceability stay with their size.
 function productFieldsToSave(product) {
   return {
     packs: product.packs
-      .map((p) => ({ size: p.size.trim(), barcode: normalizeBarcode(p.barcode) }))
+      .map((p) => ({ ...p, size: String(p.size ?? '').trim(), barcode: normalizeBarcode(p.barcode) }))
       .filter((p) => p.size || p.barcode),
     phStart: product.phStart.trim(),
     phEnd: product.phEnd.trim(),

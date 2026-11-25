@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import {
   collection,
   doc,
@@ -26,6 +26,9 @@ import {
   lookupMaterials,
   materialCopyRows,
   materialsSnapshot,
+  PACKAGING,
+  packagingFromPack,
+  packagingSnapshot,
   rememberPack,
 } from '../utils/trace'
 import { copyHtmlTable, copyText } from '../utils/clipboard'
@@ -40,15 +43,17 @@ import {
   rowsToTsv,
 } from '../utils/excelRow'
 
-// prefill: batch number from the production date's Julian code (DDDYY), size
-// and barcode from the product's first saved pack. Without it (Kitchen) they
-// start empty and are typed or picked.
+// prefill: batch number from the production date's Julian code (DDDYY), size,
+// barcode and packaging from the product's first saved pack. Without it
+// (Kitchen) they start empty and are typed or picked, and the packaging starts
+// from the usual jar and lid suppliers.
 function initialHeader(recipe, productionDate, prefill) {
   const pack = prefill ? recipe.packs?.find((p) => p.size || p.barcode) : null
   return {
     hoytsBn: prefill ? hoytsBatchNumber(productionDate) : '',
     size: pack?.size || '',
     barcode: pack?.barcode || '',
+    ...packagingFromPack(pack),
     phStart: recipe.phStart ?? PH_NOT_TESTED,
     phEnd: recipe.phEnd ?? PH_NOT_TESTED,
     document: parseRecipeName(recipe.name).document,
@@ -132,16 +137,17 @@ export default function Traceability() {
     .filter((p) => String(p.size ?? '').trim())
     .map((p) => ({ value: p.size, hint: p.barcode || 'no barcode' }))
 
-  // Picking a saved size brings its barcode with it.
+  // Picking a saved size brings its barcode and jar/lid details with it.
   function pickSize(option) {
     const pack = liveRecipe.packs.find((p) => p.size === option.value)
-    setHeader((h) => ({ ...h, size: option.value, barcode: pack?.barcode || '' }))
+    setHeader((h) => ({ ...h, size: option.value, barcode: pack?.barcode || '', ...packagingFromPack(pack) }))
   }
 
-  // Remember this size and barcode for the product (a known size takes the
-  // new barcode). Failing to save it never blocks the push or copy.
+  // Remember this size with its barcode and packaging for the product (a
+  // known size takes the new values). Failing to save it never blocks the
+  // push or copy.
   async function rememberSize() {
-    const packs = rememberPack(liveRecipe?.packs, header.size, header.barcode)
+    const packs = rememberPack(liveRecipe?.packs, header)
     if (!packs) return
     try {
       await updateDoc(doc(db, 'recipes', liveRecipe.id), { packs })
@@ -199,7 +205,7 @@ export default function Traceability() {
         phStart: header.phStart,
         phEnd: header.phEnd,
         document: header.document.trim(),
-        materials: materialsSnapshot(results, activeProductionDate),
+        materials: snapshot(),
         pushedBy: user,
         createdAt: serverTimestamp(),
       })
@@ -219,9 +225,12 @@ export default function Traceability() {
     }
   }
 
-  // Ingredient / Supplier / Country / Batch Number for each raw material,
-  // built the same way as the Daily Log's copy so both paste identically.
-  const materialRows = () => materialCopyRows(materialsSnapshot(results, activeProductionDate))
+  // The raw materials followed by the jars and lids, as pushed and copied.
+  const snapshot = () => [...materialsSnapshot(results, activeProductionDate), ...packagingSnapshot(header)]
+
+  // Ingredient / Supplier / Country / Batch Number for each row, built the
+  // same way as the Daily Log's copy so both paste identically.
+  const materialRows = () => materialCopyRows(snapshot())
 
   function reportCopy(which, ok, message) {
     if (ok) {
@@ -282,6 +291,7 @@ export default function Traceability() {
         rows.push([r.ingredientName, '', '', 'NO BATCH FOUND', '', ''])
       }
     }
+    for (const m of packagingSnapshot(header)) rows.push([m.ingredientName, m.supplierName, '', m.batchNumber, '', ''])
     const safeName = activeRecipe.name.replace(/ /g, '_').replace(/\//g, '-')
     const d = activeProductionDate
     const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(
@@ -444,9 +454,44 @@ export default function Traceability() {
                     </div>
                   ))}
                 </div>
+                {/* Jars and lids go after the raw materials when pushed or copied. */}
+                <div className="form-label small fw-semibold mt-3 mb-1">Packaging</div>
+                {/* Phones: Jars / Lids on their own line, then supplier and batch at half width each. */}
+                <div className="row g-2 align-items-center tr-packaging">
+                  <div className="d-none d-md-block col-md-1"></div>
+                  <div className="col-6 col-md-3 col-xl-2 form-label small fw-semibold mb-0">Supplier</div>
+                  <div className="col-6 col-md-3 col-xl-2 form-label small fw-semibold mb-0">Batch</div>
+                  <div className="w-100 m-0"></div>
+                  {PACKAGING.map(({ key, label }) => (
+                    <Fragment key={key}>
+                      <div className="col-12 col-md-1 small fw-medium tr-packaging-label">{label}</div>
+                      <div className="col-6 col-md-3 col-xl-2">
+                        <input
+                          id={`tr_${key}Supplier`}
+                          className="form-control form-control-sm"
+                          autoComplete="off"
+                          aria-label={`${label} supplier`}
+                          value={header[`${key}Supplier`]}
+                          onChange={(e) => setHeader((h) => ({ ...h, [`${key}Supplier`]: e.target.value }))}
+                        />
+                      </div>
+                      <div className="col-6 col-md-3 col-xl-2">
+                        <input
+                          id={`tr_${key}Batch`}
+                          className="form-control form-control-sm"
+                          autoComplete="off"
+                          aria-label={`${label} batch`}
+                          value={header[`${key}Batch`]}
+                          onChange={(e) => setHeader((h) => ({ ...h, [`${key}Batch`]: e.target.value }))}
+                        />
+                      </div>
+                      <div className="w-100 m-0"></div>
+                    </Fragment>
+                  ))}
+                </div>
                 <div className="form-text mt-2">
-                  Sizes and barcodes are remembered for this product when you push or copy. Pick a size to fill in its
-                  barcode.
+                  Sizes, barcodes and jar and lid details are remembered for this product when you push or copy. Pick a
+                  size to fill them in. Jars and lids are pushed and copied after the raw materials.
                 </div>
               </div>
               {missingCount > 0 && (

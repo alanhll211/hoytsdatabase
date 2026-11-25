@@ -55,11 +55,11 @@ function Materials({ materials }) {
               <div className="fw-semibold">{m.ingredientName}</div>
               {m.found ? (
                 <>
-                  <div className="fw-medium">{m.batchNumber}</div>
+                  <div className="fw-medium">{m.batchNumber || (m.packaging ? '—' : '')}</div>
                   <div className="text-muted small">
                     {[m.supplierName, m.country].filter(Boolean).join(' · ') || '—'}
-                    {' · received '}
-                    {formatAuDate(m.receivedDate)}
+                    {/* Jars and lids have no received date. */}
+                    {!m.packaging && ` · received ${formatAuDate(m.receivedDate)}`}
                   </div>
                 </>
               ) : (
@@ -91,7 +91,7 @@ function Materials({ materials }) {
                 <td>{m.country || dash}</td>
                 <td className="fw-medium">
                   {m.found ? (
-                    m.batchNumber
+                    m.batchNumber || dash
                   ) : (
                     <span className="text-warning fw-semibold">
                       <i className="bi bi-exclamation-triangle me-1"></i>No batch found

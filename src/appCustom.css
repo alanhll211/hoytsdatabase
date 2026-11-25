@@ -1033,6 +1033,11 @@ html.kb-open .modal-dialog { margin-bottom: calc(var(--vv-height, 50vh) * 0.5); 
   border: 1px solid var(--hairline-soft);
   border-radius: var(--radius-sm);
 }
+/* Traceability packaging: on phones the Jars / Lids label sits on its own
+   line just above its two fields. */
+@media (max-width: 767.98px) {
+  .tr-packaging > .tr-packaging-label { margin-bottom: -0.35rem; }
+}
 /* Opens the rarely used Internal Ingredient field. */
 .ffs-internal-toggle { font-size: 0.85rem; text-decoration: none; }
 .ffs-internal-toggle:hover { text-decoration: underline; }

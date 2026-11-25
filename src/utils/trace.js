@@ -91,20 +91,62 @@ export function materialCopyRows(materials) {
   ])
 }
 
-const sizeKey = (s) => String(s ?? '').trim().toLowerCase()
+const str = (v) => String(v ?? '').trim()
+const sizeKey = (s) => str(s).toLowerCase()
 
-// A product's remembered sizes after using this size and barcode: a new size
-// is added, a known size takes the new barcode. A blank barcode never wipes a
-// saved one, and empty placeholder packs are dropped. null means nothing
-// changed, so there is nothing to save.
-export function rememberPack(packs, size, barcode) {
-  const s = String(size ?? '').trim()
-  const b = String(barcode ?? '').trim()
+// Packaging recorded after the raw materials: jars and lids, each with a
+// supplier and batch. A size with nothing remembered starts from the usual
+// suppliers, and anything can be changed.
+export const PACKAGING = [
+  { key: 'jar', label: 'Jars', defaultSupplier: 'VISY' },
+  { key: 'lid', label: 'Lids', defaultSupplier: 'PB Packaging' },
+]
+const PACKAGING_FIELDS = PACKAGING.flatMap(({ key }) => [`${key}Supplier`, `${key}Batch`])
+
+// jarSupplier, jarBatch, lidSupplier, lidBatch for a saved size (or none).
+export function packagingFromPack(pack) {
+  const out = {}
+  for (const { key, defaultSupplier } of PACKAGING) {
+    out[`${key}Supplier`] = str(pack?.[`${key}Supplier`]) || defaultSupplier
+    out[`${key}Batch`] = str(pack?.[`${key}Batch`])
+  }
+  return out
+}
+
+// The packaging as rows in the same shape as materialsSnapshot, so it is
+// pushed, shown and copied right after the raw materials. Left out when both
+// supplier and batch are blank.
+export function packagingSnapshot(values) {
+  return PACKAGING.map(({ key, label }) => ({
+    ingredientName: label,
+    supplierName: str(values[`${key}Supplier`]),
+    country: '',
+    batchNumber: withTextPrefix(values[`${key}Batch`]),
+    receivedDate: null,
+    createdAt: null,
+    found: true,
+    packaging: true,
+  })).filter((m) => m.supplierName || m.batchNumber)
+}
+
+// A product's remembered sizes after using this size with its barcode and
+// packaging: a new size is added, a known size takes the new values. A blank
+// value never wipes a saved one, and empty placeholder packs are dropped.
+// null means nothing changed, so there is nothing to save.
+// pack: { size, barcode, jarSupplier, jarBatch, lidSupplier, lidBatch }
+export function rememberPack(packs, pack) {
+  const s = str(pack.size)
   if (!s) return null
-  const current = packs || []
-  const kept = current.filter((p) => String(p.size ?? '').trim() || String(p.barcode ?? '').trim())
+  const kept = (packs || []).filter((p) => str(p.size) || str(p.barcode))
+  const fresh = Object.fromEntries(['barcode', ...PACKAGING_FIELDS].map((f) => [f, str(pack[f])]))
   const i = kept.findIndex((p) => sizeKey(p.size) === sizeKey(s))
-  if (i === -1) return [...kept, { size: s, barcode: b }]
-  if (!b || String(kept[i].barcode ?? '').trim() === b) return null
-  return kept.map((p, x) => (x === i ? { ...p, barcode: b } : p))
+  if (i === -1) {
+    const extras = Object.fromEntries(PACKAGING_FIELDS.filter((f) => fresh[f]).map((f) => [f, fresh[f]]))
+    return [...kept, { size: s, barcode: fresh.barcode, ...extras }]
+  }
+  const patch = Object.fromEntries(
+    Object.entries(fresh).filter(([f, v]) => v && v !== str(kept[i][f]))
+  )
+  if (!Object.keys(patch).length) return null
+  return kept.map((p, x) => (x === i ? { ...p, ...patch } : p))
 }
