@@ -33,12 +33,14 @@ import {
   fillForSupplier,
   internalOptions,
   fillForInternal,
+  fillFromBatch,
   weightOptions,
   unitsForWeight,
   buildFfsRows,
   ffsRowsToHtml,
   ffsRowsToTsv,
 } from '../utils/ffs'
+import { latestBatch } from '../utils/trace'
 
 const COLLECTION = 'ffsEntries'
 const DAYS_PER_PAGE = 10
@@ -118,6 +120,9 @@ export default function FfsLog() {
   // Lines whose Internal Ingredient field has been opened. It's rarely used,
   // so it stays behind a button unless opened or already filled in.
   const [internalOpen, setInternalOpen] = useState(() => new Set())
+  // Raw materials (RMs) recorded on the Batches page, offered as internal
+  // ingredients: [{ id, name }].
+  const [rms, setRms] = useState([])
 
   useEffect(
     () =>
@@ -135,6 +140,16 @@ export default function FfsLog() {
     []
   )
 
+  useEffect(
+    () =>
+      onSnapshot(
+        query(collection(db, 'ingredients'), orderBy('name')),
+        (snap) => setRms(snap.docs.map((d) => ({ id: d.id, name: d.data().name || '' }))),
+        (err) => console.error(err)
+      ),
+    []
+  )
+
   const history = useMemo(() => sortNewestFirst(entries), [entries])
   // "Last time" never looks at the entry being edited.
   const past = useMemo(
@@ -145,7 +160,7 @@ export default function FfsLog() {
   const productName = form?.productName ?? ''
   const productOpts = useMemo(() => productOptions(past), [past])
   const supplierOpts = useMemo(() => supplierOptions(past, productName), [past, productName])
-  const internalOpts = useMemo(() => internalOptions(past, productName), [past, productName])
+  const internalOpts = useMemo(() => internalOptions(past, productName, rms), [past, productName, rms])
   const weightOpts = useMemo(() => weightOptions(past, productName), [past, productName])
 
   const days = useMemo(() => {
@@ -267,16 +282,46 @@ export default function FfsLog() {
     }))
   }
 
+  // An RM fills supplier, country and batch from its latest batch received on
+  // or before the run date; anything else from the last line that used it.
   function pickInternal(i, option) {
     setForm((f) => ({
       ...f,
       lines: f.lines.map((l, x) =>
         x === i
-          ? { ...l, internalIngredient: option.value, ...fillForInternal(past, f.productName, option.value) }
+          ? {
+              ...l,
+              internalIngredient: option.value,
+              ...(option.rmId ? {} : fillForInternal(past, f.productName, option.value)),
+            }
           : l
       ),
       machineFill: null,
     }))
+    if (option.rmId) fillFromRm(i, option)
+  }
+
+  async function fillFromRm(i, option) {
+    const runDate = parseAuDate(form.date) || new Date(new Date().setHours(0, 0, 0, 0))
+    let batch
+    try {
+      batch = await latestBatch(option.rmId, runDate)
+    } catch (err) {
+      console.error(err)
+      flash(`Could not look up the latest ${option.value} batch. Please fill it in.`, 'danger')
+      return
+    }
+    if (!batch) {
+      flash(`No ${option.value} batch received on or before ${formatAuDate(runDate)}. Please fill it in.`, 'warning')
+      return
+    }
+    const fill = fillFromBatch(batch, runDate)
+    // Only if the line still has this ingredient once the lookup is back.
+    setForm((f) =>
+      f && str(f.lines[i]?.internalIngredient).toLowerCase() === str(option.value).toLowerCase()
+        ? { ...f, lines: f.lines.map((l, x) => (x === i ? { ...l, ...fill } : l)), machineFill: null }
+        : f
+    )
   }
 
   function pickWeight(option) {
@@ -771,7 +816,7 @@ export default function FfsLog() {
                                   onPick={(o) => pickInternal(i, o)}
                                   options={internalOpts}
                                   placeholder="Optional"
-                                  emptyText="None recorded for this product"
+                                  emptyText="No raw materials recorded yet"
                                 />
                               </div>
                             ) : (

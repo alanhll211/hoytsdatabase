@@ -5,6 +5,29 @@ import { withTextPrefix } from './batch'
 
 const ms = (t) => t?.toMillis?.() ?? 0
 
+// The latest batch of one ingredient received on or before a date, or null.
+// A few recent batches are read so that, when two share a received date, the
+// one entered last wins (e.g. a new bag recorded the same day).
+export async function latestBatch(ingredientId, onOrBefore) {
+  const snap = await getDocs(
+    query(
+      collection(db, 'batches'),
+      where('ingredientId', '==', ingredientId),
+      where('receivedDate', '<=', Timestamp.fromDate(onOrBefore)),
+      orderBy('receivedDate', 'desc'),
+      limit(10)
+    )
+  )
+  const latest = snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .sort(
+      (a, b) =>
+        ms(b.receivedDate) - ms(a.receivedDate) ||
+        (b.createdAt ? ms(b.createdAt) : Infinity) - (a.createdAt ? ms(a.createdAt) : Infinity)
+    )[0]
+  return latest || null
+}
+
 // The raw materials behind one product on one production date: for each of
 // the recipe's ingredients, the latest batch received on or before that date.
 // ingredients: [{ id, name }] for display names.
@@ -15,33 +38,14 @@ export async function lookupMaterials(recipe, productionDate, ingredients) {
   // would otherwise mismatch the supplier/country/batch columns.
   const nameById = new Map(ingredients.map((i) => [i.id, i.name]))
   const ingredientNames = recipe.ingredientNames || []
-  const cutoff = Timestamp.fromDate(productionDate)
 
   // Query each distinct ingredient only once, even if it appears more than
-  // once in the recipe, to avoid duplicate Firestore reads. A few recent
-  // batches are read so that, when two share a received date, the one
-  // entered last wins (e.g. a new bag recorded the same day).
+  // once in the recipe, to avoid duplicate Firestore reads.
   const uniqueIds = [...new Set(ingredientIds)]
   const batchByIngredient = new Map()
   await Promise.all(
     uniqueIds.map(async (ingredientId) => {
-      const snap = await getDocs(
-        query(
-          collection(db, 'batches'),
-          where('ingredientId', '==', ingredientId),
-          where('receivedDate', '<=', cutoff),
-          orderBy('receivedDate', 'desc'),
-          limit(10)
-        )
-      )
-      const latest = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
-        .sort(
-          (a, b) =>
-            ms(b.receivedDate) - ms(a.receivedDate) ||
-            (b.createdAt ? ms(b.createdAt) : Infinity) - (a.createdAt ? ms(a.createdAt) : Infinity)
-        )[0]
-      batchByIngredient.set(ingredientId, latest || null)
+      batchByIngredient.set(ingredientId, await latestBatch(ingredientId, productionDate))
     })
   )
 

@@ -1,4 +1,4 @@
-import { formatAuDate } from './date'
+import { formatAuDate, formatDdmmyy } from './date'
 import { withTextPrefix } from './batch'
 import { DATE_FORMAT, TEXT_FORMAT, htmlTable } from './excelHtml'
 
@@ -92,17 +92,45 @@ export function fillForSupplier(history, productName, supplier, internalIngredie
   return {}
 }
 
-export function internalOptions(history, productName) {
+// Internal ingredients: the ones this product has used first, then every raw
+// material (RM) on record, since an internal ingredient is usually one of our
+// own RMs. Options that are RMs carry rmId, so picking one fills the line
+// from that RM's latest batch. rms: [{ id, name }].
+export function internalOptions(history, productName, rms = []) {
   const product = norm(productName)
+  const rmByKey = new Map(rms.map((r) => [norm(r.name), r]))
   const byKey = new Map()
   for (const e of history) {
     if (!product || norm(e.productName) !== product) continue
     for (const l of e.lines || []) {
       const key = norm(l.internalIngredient)
-      if (key && !byKey.has(key)) byKey.set(key, { value: l.internalIngredient, hint: l.supplier || '' })
+      if (key && !byKey.has(key)) {
+        byKey.set(key, {
+          value: l.internalIngredient,
+          hint: l.supplier || '',
+          group: 'Used for this product',
+          rmId: rmByKey.get(key)?.id,
+        })
+      }
     }
   }
-  return [...byKey.values()]
+  const others = rms
+    .filter((r) => norm(r.name) && !byKey.has(norm(r.name)))
+    .map((r) => ({ value: r.name, group: 'Raw materials', rmId: r.id }))
+  return [...byKey.values(), ...others]
+}
+
+// A line's supplier, country and batch from an RM batch. A "Current Date"
+// batch takes the run date as DDMMYY. RM batch numbers are stored with the
+// apostrophe Excel needs; copying adds it back, so it is dropped here.
+export function fillFromBatch(batch, runDate) {
+  return {
+    supplier: batch.supplierName || '',
+    country: batch.country || '',
+    batchNumber: batch.useCurrentDate
+      ? formatDdmmyy(runDate)
+      : String(batch.batchNumber ?? '').trim().replace(/^'/, ''),
+  }
 }
 
 // Supplier, country and batch from the last line with this internal ingredient.
