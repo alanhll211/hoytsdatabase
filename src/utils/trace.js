@@ -146,19 +146,22 @@ export function materialComments(materials) {
   return materials.map((m) => m.comment || '')
 }
 
-// A product's remembered sizes after using this size with its barcode and
-// packaging: a new size is added, a known size takes the new values. A blank
-// value never wipes a saved one, and empty placeholder packs are dropped.
-// null means nothing changed, so there is nothing to save.
-// pack: { size, barcode, jarSupplier, jarBatch, lidSupplier, lidBatch }
+// A product's remembered sizes after using this size with its barcode, jar
+// size and packaging: a new size is added, a known size takes the new values.
+// With a jar size, the jar and lid details are kept with the jar size instead
+// (see jarSizeUpdate). A blank value never wipes a saved one, and empty
+// placeholder packs are dropped. null means nothing changed, so there is
+// nothing to save.
+// pack: { size, barcode, jarSize, jarSupplier, jarBatch, lidSupplier, lidBatch }
 export function rememberPack(packs, pack) {
   const s = str(pack.size)
   if (!s) return null
   const kept = (packs || []).filter((p) => str(p.size) || str(p.barcode))
-  const fresh = Object.fromEntries(['barcode', ...PACKAGING_FIELDS].map((f) => [f, str(pack[f])]))
+  const fields = ['barcode', 'jarSize', ...(str(pack.jarSize) ? [] : PACKAGING_FIELDS)]
+  const fresh = Object.fromEntries(fields.map((f) => [f, str(pack[f])]))
   const i = kept.findIndex((p) => sizeKey(p.size) === sizeKey(s))
   if (i === -1) {
-    const extras = Object.fromEntries(PACKAGING_FIELDS.filter((f) => fresh[f]).map((f) => [f, fresh[f]]))
+    const extras = Object.fromEntries(fields.slice(1).filter((f) => fresh[f]).map((f) => [f, fresh[f]]))
     return [...kept, { size: s, barcode: fresh.barcode, ...extras }]
   }
   const patch = Object.fromEntries(
@@ -166,4 +169,45 @@ export function rememberPack(packs, pack) {
   )
   if (!Object.keys(patch).length) return null
   return kept.map((p, x) => (x === i ? { ...p, ...patch } : p))
+}
+
+// ---- Jar sizes ----
+// Jars come in a few sizes, each with its own lid. The jar and lid supplier
+// and batch last used with each jar size are kept in the jarSizes collection
+// and shared by every product, so picking a jar size fills them in. A product
+// size remembers which jar size it uses.
+// jarSizes: [{ id, name, jarSupplier, jarBatch, lidSupplier, lidBatch }]
+
+export function findJarSize(jarSizes, name) {
+  const key = sizeKey(name)
+  return key ? jarSizes.find((j) => sizeKey(j.name) === key) || null : null
+}
+
+// Dropdown options, smallest number first, each hinting its jar / lid batch.
+export function jarSizeOptions(jarSizes) {
+  return jarSizes
+    .filter((j) => str(j.name))
+    .sort((a, b) => str(a.name).localeCompare(str(b.name), undefined, { numeric: true }))
+    .map((j) => ({ value: str(j.name), hint: [j.jarBatch, j.lidBatch].map(str).filter(Boolean).join(' / ') }))
+}
+
+// jarSize plus the jar and lid fields for a product size: from its jar size
+// when that is on record, otherwise what the size itself remembers, or the
+// usual suppliers.
+export function packagingForPack(pack, jarSizes) {
+  const jar = findJarSize(jarSizes, pack?.jarSize)
+  return { jarSize: str(pack?.jarSize), ...packagingFromPack(jar || pack) }
+}
+
+// What to save for the jar size in use: { id, data } to update that jar size
+// (id null adds a new one), or null when nothing changed. A blank value never
+// wipes a saved one.
+export function jarSizeUpdate(jarSizes, values) {
+  const name = str(values.jarSize)
+  if (!name) return null
+  const fresh = Object.entries(Object.fromEntries(PACKAGING_FIELDS.map((f) => [f, str(values[f])])))
+  const jar = findJarSize(jarSizes, name)
+  if (!jar) return { id: null, data: { name, ...Object.fromEntries(fresh.filter(([, v]) => v)) } }
+  const patch = Object.fromEntries(fresh.filter(([f, v]) => v && v !== str(jar[f])))
+  return Object.keys(patch).length ? { id: jar.id, data: patch } : null
 }

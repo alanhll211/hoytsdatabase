@@ -32,6 +32,10 @@ import {
   materialComments,
   packagingSnapshot,
   rememberPack,
+  findJarSize,
+  jarSizeOptions,
+  packagingForPack,
+  jarSizeUpdate,
 } from '../utils/trace'
 import { copyHtmlTable, copyText } from '../utils/clipboard'
 import {
@@ -46,16 +50,16 @@ import {
 } from '../utils/excelRow'
 
 // prefill: batch number from the production date's Julian code (DDDYY), size,
-// barcode and packaging from the product's first saved pack. Without it
-// (Kitchen) they start empty and are typed or picked, and the packaging starts
-// from the usual jar and lid suppliers.
-function initialHeader(recipe, productionDate, prefill) {
+// barcode, jar size and packaging from the product's first saved pack.
+// Without it (Kitchen) they start empty and are typed or picked, and the
+// packaging starts from the usual jar and lid suppliers.
+function initialHeader(recipe, productionDate, prefill, jarSizes) {
   const pack = prefill ? recipe.packs?.find((p) => p.size || p.barcode) : null
   return {
     hoytsBn: prefill ? hoytsBatchNumber(productionDate) : '',
     size: pack?.size || '',
     barcode: pack?.barcode || '',
-    ...packagingFromPack(pack),
+    ...packagingForPack(pack, jarSizes),
     ...blankPackagingComments(),
     phStart: recipe.phStart ?? PH_NOT_TESTED,
     phEnd: recipe.phEnd ?? PH_NOT_TESTED,
@@ -68,6 +72,8 @@ export default function Traceability() {
   const { user, profile } = useAuth()
   const [recipes, setRecipes] = useState([])
   const [ingredients, setIngredients] = useState([])
+  // Jar sizes with the jar and lid details last used with each.
+  const [jarSizes, setJarSizes] = useState([])
 
   const [selectedRecipeId, setSelectedRecipeId] = useState('')
   const [productionDateStr, setProductionDateStr] = useState(() => formatAuDate(new Date()))
@@ -93,9 +99,15 @@ export default function Traceability() {
     const unsubIngredients = onSnapshot(collection(db, 'ingredients'), (snap) =>
       setIngredients(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
     )
+    const unsubJarSizes = onSnapshot(
+      collection(db, 'jarSizes'),
+      (snap) => setJarSizes(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (err) => console.error(err)
+    )
     return () => {
       unsubRecipes()
       unsubIngredients()
+      unsubJarSizes()
     }
   }, [])
 
@@ -124,7 +136,7 @@ export default function Traceability() {
       setResults(items)
       setActiveRecipe(recipe)
       setActiveProductionDate(productionDate)
-      setHeader(initialHeader(recipe, productionDate, profile.prefill))
+      setHeader(initialHeader(recipe, productionDate, profile.prefill, jarSizes))
       setCopied(null)
       setPushedKey(null)
     } finally {
@@ -140,20 +152,38 @@ export default function Traceability() {
     .filter((p) => String(p.size ?? '').trim())
     .map((p) => ({ value: p.size, hint: p.barcode || 'no barcode' }))
 
-  // Picking a saved size brings its barcode and jar/lid details with it.
+  const jarSizeOpts = jarSizeOptions(jarSizes)
+
+  // Picking a saved size brings its barcode, jar size and jar/lid details with
+  // it. A size with no jar size yet leaves a jar size already picked alone.
   function pickSize(option) {
     const pack = liveRecipe.packs.find((p) => p.size === option.value)
-    setHeader((h) => ({ ...h, size: option.value, barcode: pack?.barcode || '', ...packagingFromPack(pack) }))
+    setHeader((h) => {
+      const next = { ...h, size: option.value, barcode: pack?.barcode || '' }
+      if (!String(pack?.jarSize ?? '').trim() && h.jarSize.trim()) return next
+      return { ...next, ...packagingForPack(pack, jarSizes) }
+    })
   }
 
-  // Remember this size with its barcode and packaging for the product (a
-  // known size takes the new values). Failing to save it never blocks the
-  // push or copy.
+  // Picking a jar size brings the jar and lid details last used with it.
+  function pickJarSize(option) {
+    const jar = findJarSize(jarSizes, option.value)
+    setHeader((h) => ({ ...h, jarSize: option.value, ...packagingFromPack(jar) }))
+  }
+
+  // Remember this size with its barcode, jar size and packaging for the
+  // product (a known size takes the new values), and the jar and lid details
+  // for the jar size. Failing to save never blocks the push or copy.
   async function rememberSize() {
     const packs = rememberPack(liveRecipe?.packs, header)
-    if (!packs) return
+    const jar = jarSizeUpdate(jarSizes, header)
     try {
-      await updateDoc(doc(db, 'recipes', liveRecipe.id), { packs })
+      if (packs) await updateDoc(doc(db, 'recipes', liveRecipe.id), { packs })
+      if (jar) {
+        const data = { ...jar.data, updatedAt: serverTimestamp(), updatedBy: user }
+        if (jar.id) await updateDoc(doc(db, 'jarSizes', jar.id), data)
+        else await addDoc(collection(db, 'jarSizes'), { ...data, createdAt: serverTimestamp() })
+      }
     } catch (err) {
       console.error(err)
     }
@@ -204,6 +234,7 @@ export default function Traceability() {
         batchNumber,
         size: header.size.trim(),
         barcode: normalizeBarcode(header.barcode),
+        jarSize: header.jarSize.trim(),
         // Kept so the Daily Log can copy the same Excel rows later.
         phStart: header.phStart,
         phEnd: header.phEnd,
@@ -467,6 +498,23 @@ export default function Traceability() {
                 {/* Phones: Jars / Lids on their own line, then supplier and batch at half
                     width each, then comments across the full width. */}
                 <div className="row g-2 align-items-center tr-packaging">
+                  <div className="col-12 col-md-1 small fw-medium tr-packaging-label">
+                    <label className="mb-0 text-nowrap" htmlFor="tr_jarSize">Jar size</label>
+                  </div>
+                  <div className="col-6 col-md-3 col-xl-2">
+                    <ComboInput
+                      id="tr_jarSize"
+                      small
+                      selectOnFocus
+                      value={header.jarSize}
+                      onChange={(v) => setHeader((h) => ({ ...h, jarSize: v }))}
+                      onPick={pickJarSize}
+                      options={jarSizeOpts}
+                      placeholder="Pick a jar size"
+                      emptyText="No jar sizes yet. Type one, e.g. 500ml."
+                    />
+                  </div>
+                  <div className="w-100 mb-1"></div>
                   <div className="d-none d-md-block col-md-1"></div>
                   <div className="col-6 col-md-3 col-xl-2 form-label small fw-semibold mb-0">Supplier</div>
                   <div className="col-6 col-md-3 col-xl-2 form-label small fw-semibold mb-0">Batch</div>
@@ -511,8 +559,9 @@ export default function Traceability() {
                   ))}
                 </div>
                 <div className="form-text mt-2">
-                  Sizes, barcodes and jar and lid suppliers and batches are remembered for this product when you push or
-                  copy. Pick a size to fill them in. Jars and lids are pushed and copied after the raw materials, and
+                  Pick a jar size to fill in the jar and lid details last used with it, on any product. Push or Copy All
+                  remembers them for the jar size, and the size, barcode and jar size for this product, so picking the
+                  size fills everything in next time. Jars and lids are pushed and copied after the raw materials, and
                   Copy All puts their comments in column P.
                 </div>
               </div>
