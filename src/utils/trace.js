@@ -99,8 +99,9 @@ const str = (v) => String(v ?? '').trim()
 const sizeKey = (s) => str(s).toLowerCase()
 
 // Packaging recorded after the raw materials: jars and lids, each with a
-// supplier and batch. A size with nothing remembered starts from the usual
-// suppliers, and anything can be changed.
+// supplier, batch and comment. A size with nothing remembered starts from the
+// usual suppliers, and anything can be changed. Comments belong to one run,
+// so they start blank and are never remembered with the size.
 export const PACKAGING = [
   { key: 'jar', label: 'Jars', defaultSupplier: 'VISY' },
   { key: 'lid', label: 'Lids', defaultSupplier: 'PB Packaging' },
@@ -117,9 +118,14 @@ export function packagingFromPack(pack) {
   return out
 }
 
+// jarComment and lidComment, blank for a new lookup.
+export function blankPackagingComments() {
+  return Object.fromEntries(PACKAGING.map(({ key }) => [`${key}Comment`, '']))
+}
+
 // The packaging as rows in the same shape as materialsSnapshot, so it is
-// pushed, shown and copied right after the raw materials. Left out when both
-// supplier and batch are blank.
+// pushed, shown and copied right after the raw materials. Left out when
+// supplier, batch and comment are all blank.
 export function packagingSnapshot(values) {
   return PACKAGING.map(({ key, label }) => ({
     ingredientName: label,
@@ -130,7 +136,14 @@ export function packagingSnapshot(values) {
     createdAt: null,
     found: true,
     packaging: true,
-  })).filter((m) => m.supplierName || m.batchNumber)
+    comment: str(values[`${key}Comment`]),
+  })).filter((m) => m.supplierName || m.batchNumber || m.comment)
+}
+
+// Column P (Comments) of each material row in Copy All; only jars and lids
+// have one.
+export function materialComments(materials) {
+  return materials.map((m) => m.comment || '')
 }
 
 // A product's remembered sizes after using this size with its barcode and

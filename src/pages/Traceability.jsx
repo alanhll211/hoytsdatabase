@@ -28,6 +28,8 @@ import {
   materialsSnapshot,
   PACKAGING,
   packagingFromPack,
+  blankPackagingComments,
+  materialComments,
   packagingSnapshot,
   rememberPack,
 } from '../utils/trace'
@@ -54,6 +56,7 @@ function initialHeader(recipe, productionDate, prefill) {
     size: pack?.size || '',
     barcode: pack?.barcode || '',
     ...packagingFromPack(pack),
+    ...blankPackagingComments(),
     phStart: recipe.phStart ?? PH_NOT_TESTED,
     phEnd: recipe.phEnd ?? PH_NOT_TESTED,
     document: parseRecipeName(recipe.name).document,
@@ -243,14 +246,17 @@ export default function Traceability() {
   }
 
   // Copy the product row plus one row per raw material, spanning the sheet's
-  // columns A-P. Paste into column A of the next empty row.
+  // columns A-P, with jar and lid comments in column P. Paste into column A of
+  // the next empty row.
   function copyAll() {
     if (!results) return
+    const materials = snapshot()
     const rows = buildExcelRows({
       productionDate: activeProductionDate,
       recipeName: activeRecipe.name,
       header: { ...header, barcode: normalizeBarcode(header.barcode) },
-      materials: materialRows(),
+      materials: materialCopyRows(materials),
+      comments: materialComments(materials),
     })
     const ok = copyHtmlTable(rowsToHtml(rows), rowsToTsv(rows))
     reportCopy('all', ok, `Copied ${rows.length} rows. Paste into column A in Excel.`)
@@ -275,7 +281,7 @@ export default function Traceability() {
       ['Recipe', activeRecipe.name],
       ['Production Date', formatAuDate(activeProductionDate)],
       [],
-      ['Ingredient', 'Supplier Name', 'Country', 'Batch Number', 'Received Date', 'Record Created Date'],
+      ['Ingredient', 'Supplier Name', 'Country', 'Batch Number', 'Received Date', 'Record Created Date', 'Comments'],
     ]
     for (const r of results) {
       if (r.batch) {
@@ -291,7 +297,9 @@ export default function Traceability() {
         rows.push([r.ingredientName, '', '', 'NO BATCH FOUND', '', ''])
       }
     }
-    for (const m of packagingSnapshot(header)) rows.push([m.ingredientName, m.supplierName, '', m.batchNumber, '', ''])
+    for (const m of packagingSnapshot(header)) {
+      rows.push([m.ingredientName, m.supplierName, '', m.batchNumber, '', '', m.comment])
+    }
     const safeName = activeRecipe.name.replace(/ /g, '_').replace(/\//g, '-')
     const d = activeProductionDate
     const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(
@@ -456,11 +464,13 @@ export default function Traceability() {
                 </div>
                 {/* Jars and lids go after the raw materials when pushed or copied. */}
                 <div className="form-label small fw-semibold mt-3 mb-1">Packaging</div>
-                {/* Phones: Jars / Lids on their own line, then supplier and batch at half width each. */}
+                {/* Phones: Jars / Lids on their own line, then supplier and batch at half
+                    width each, then comments across the full width. */}
                 <div className="row g-2 align-items-center tr-packaging">
                   <div className="d-none d-md-block col-md-1"></div>
                   <div className="col-6 col-md-3 col-xl-2 form-label small fw-semibold mb-0">Supplier</div>
                   <div className="col-6 col-md-3 col-xl-2 form-label small fw-semibold mb-0">Batch</div>
+                  <div className="d-none d-md-block col-md-5 col-xl-4 form-label small fw-semibold mb-0">Comments</div>
                   <div className="w-100 m-0"></div>
                   {PACKAGING.map(({ key, label }) => (
                     <Fragment key={key}>
@@ -485,13 +495,25 @@ export default function Traceability() {
                           onChange={(e) => setHeader((h) => ({ ...h, [`${key}Batch`]: e.target.value }))}
                         />
                       </div>
+                      <div className="col-12 col-md-5 col-xl-4">
+                        <input
+                          id={`tr_${key}Comment`}
+                          className="form-control form-control-sm"
+                          autoComplete="off"
+                          placeholder="Comments"
+                          aria-label={`${label} comments`}
+                          value={header[`${key}Comment`]}
+                          onChange={(e) => setHeader((h) => ({ ...h, [`${key}Comment`]: e.target.value }))}
+                        />
+                      </div>
                       <div className="w-100 m-0"></div>
                     </Fragment>
                   ))}
                 </div>
                 <div className="form-text mt-2">
-                  Sizes, barcodes and jar and lid details are remembered for this product when you push or copy. Pick a
-                  size to fill them in. Jars and lids are pushed and copied after the raw materials.
+                  Sizes, barcodes and jar and lid suppliers and batches are remembered for this product when you push or
+                  copy. Pick a size to fill them in. Jars and lids are pushed and copied after the raw materials, and
+                  Copy All puts their comments in column P.
                 </div>
               </div>
               {missingCount > 0 && (

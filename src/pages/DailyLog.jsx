@@ -18,7 +18,7 @@ import { useAuth } from '../AuthContext'
 import { displayName } from '../permissions'
 import DatePickInput from '../components/DatePickInput'
 import { formatAuDate, formatAuDateTime, parseAuDate } from '../utils/date'
-import { lookupMaterials, materialCopyRows, materialsSnapshot } from '../utils/trace'
+import { lookupMaterials, materialComments, materialCopyRows, materialsSnapshot } from '../utils/trace'
 import { copyHtmlTable, copyText } from '../utils/clipboard'
 import {
   PH_NOT_TESTED,
@@ -46,6 +46,8 @@ const dash = <span className="text-muted">—</span>
 // The raw material table, laid out like the Traceability results.
 function Materials({ materials }) {
   if (!materials.length) return <div className="text-muted small px-4 py-3">This product has no ingredients.</div>
+  // Only jars and lids carry comments; the column shows when one has any.
+  const hasComments = materials.some((m) => m.comment)
   return (
     <>
       <ul className="material-list d-md-none">
@@ -61,6 +63,7 @@ function Materials({ materials }) {
                     {/* Jars and lids have no received date. */}
                     {!m.packaging && ` · received ${formatAuDate(m.receivedDate)}`}
                   </div>
+                  {m.comment && <div className="small fst-italic">{m.comment}</div>}
                 </>
               ) : (
                 <div className="text-warning fw-semibold small">
@@ -81,6 +84,7 @@ function Materials({ materials }) {
               <th>Batch Number</th>
               <th>Received Date</th>
               <th>Record Created Date</th>
+              {hasComments && <th>Comments</th>}
             </tr>
           </thead>
           <tbody>
@@ -100,6 +104,7 @@ function Materials({ materials }) {
                 </td>
                 <td>{m.receivedDate ? formatAuDate(m.receivedDate) : dash}</td>
                 <td className="text-muted small">{m.createdAt ? formatAuDateTime(m.createdAt) : dash}</td>
+                {hasComments && <td>{m.comment || ''}</td>}
               </tr>
             ))}
           </tbody>
@@ -246,6 +251,7 @@ export default function DailyLog() {
       productName: e.productName || '',
       header: excelHeader(e),
       materials: materialCopyRows(materials),
+      comments: materialComments(materials),
     })
     const ok = copyHtmlTable(rowsToHtml(rows), rowsToTsv(rows))
     reportCopy(`${e.id}:all`, ok, `Copied ${rows.length} rows. Paste into column A in Excel.`)

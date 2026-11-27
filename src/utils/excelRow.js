@@ -7,7 +7,7 @@ import { DATE_FORMAT, TEXT_FORMAT, htmlTable } from './excelHtml'
 // sheet's 16 columns (A Date ... P Comments) so pasting starts at column A.
 
 export const COLUMN_COUNT = 16
-const COL = { date: 0, product: 1, hoytsBn: 2, rawMaterial: 3, size: 7, barcode: 8, phStart: 12, phEnd: 13, document: 14 }
+const COL = { date: 0, product: 1, hoytsBn: 2, rawMaterial: 3, size: 7, barcode: 8, phStart: 12, phEnd: 13, document: 14, comments: 15 }
 const HEADER_FILL = '#d9d9d9'
 
 // "Not tested" marker the sheet uses in the pH columns.
@@ -37,8 +37,9 @@ export function normalizeBarcode(value) {
 }
 
 // productName (optional) overrides the name taken from recipeName, e.g. one
-// corrected in the Daily Log.
-export function buildExcelRows({ productionDate, recipeName, productName, header, materials }) {
+// corrected in the Daily Log. materials: the D-G values of each material row;
+// comments (optional): column P of each, in the same order.
+export function buildExcelRows({ productionDate, recipeName, productName, header, materials, comments = [] }) {
   const first = new Array(COLUMN_COUNT).fill('')
   first[COL.date] = formatAuDate(productionDate)
   first[COL.product] = productName ?? parseRecipeName(recipeName).productName
@@ -50,11 +51,12 @@ export function buildExcelRows({ productionDate, recipeName, productName, header
   first[COL.phEnd] = header.phEnd
   first[COL.document] = header.document
 
-  const rest = materials.map((values) => {
+  const rest = materials.map((values, r) => {
     const row = new Array(COLUMN_COUNT).fill('')
     values.forEach((v, i) => {
       row[COL.rawMaterial + i] = v
     })
+    if (comments[r]) row[COL.comments] = comments[r]
     return row
   })
   return [first, ...rest].map((row) => row.map((v) => String(v ?? '').replace(/[\t\r\n]+/g, ' ')))
