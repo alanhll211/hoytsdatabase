@@ -1,8 +1,37 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, Link, useLocation } from 'react-router-dom'
 import { useFlash } from './FlashContext'
 import { useAuth } from './AuthContext'
 import { menuFor, siteForPath } from './permissions'
+import { newerVersionDeployed } from './utils/appVersion'
+
+const VERSION_CHECK_MS = 5 * 60 * 1000
+
+// True once a newer version of the app has been deployed. Checked on opening,
+// on coming back to the app, and every few minutes while it is on screen.
+function useNewVersion() {
+  const [available, setAvailable] = useState(false)
+  useEffect(() => {
+    if (available) return
+    let active = true
+    const check = async () => {
+      if (document.visibilityState !== 'visible') return
+      if ((await newerVersionDeployed()) && active) setAvailable(true)
+    }
+    check()
+    const onVisible = () => document.visibilityState === 'visible' && check()
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', check)
+    const timer = setInterval(check, VERSION_CHECK_MS)
+    return () => {
+      active = false
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', check)
+      clearInterval(timer)
+    }
+  }, [available])
+  return available
+}
 
 // Each site has its own pages; the switch in the nav moves between them.
 const SITES = [
@@ -85,6 +114,17 @@ export default function Layout() {
   // hidden from them.
   const brandTo = navItems.some((item) => item.to === site.home) ? site.home : navItems[0]?.to || site.home
   const [lastPath, setLastPath] = useState(location.pathname)
+
+  // With a newer version out, moving to another page loads it. Nothing typed
+  // is lost, since leaving the page clears it anyway.
+  const newVersion = useNewVersion()
+  const newVersionRef = useRef(false)
+  useEffect(() => {
+    newVersionRef.current = newVersion
+  }, [newVersion])
+  useEffect(() => {
+    if (newVersionRef.current) window.location.reload()
+  }, [location.pathname])
 
   // Close the mobile menu whenever the route changes (adjusting state during
   // render, rather than in an effect, avoids an extra paint with it open).
@@ -187,6 +227,15 @@ export default function Layout() {
       </header>
 
       <main className="app-content">
+        {newVersion && (
+          <div className="update-banner" role="status">
+            <i className="bi bi-arrow-repeat"></i>
+            <span>A new version of the app is ready.</span>
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => window.location.reload()}>
+              Reload
+            </button>
+          </div>
+        )}
         <Outlet />
       </main>
 

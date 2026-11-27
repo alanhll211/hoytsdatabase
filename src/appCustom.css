@@ -1138,3 +1138,19 @@ html.kb-open .modal-dialog { margin-bottom: calc(var(--vv-height, 50vh) * 0.5); 
 @media (max-width: 767.98px) {
   .dl-detail-body { position: sticky; left: 0; width: calc(100vw - 2rem); }
 }
+
+/* Newer version deployed while the app was open. */
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0 auto 1rem;
+  max-width: 1320px;
+  padding: 0.55rem 0.75rem 0.55rem 1rem;
+  border-radius: 12px;
+  background: #e8f1fd;
+  color: #0a3d7a;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+.update-banner > span { flex: 1; }
